@@ -6,7 +6,7 @@
 """
 -Added options for pointwise and simultaneous CCDF errorbars.
     --Pointwise approach will give you bounds on each point such that i.e. 95% of the time the data plus those errorbars will be on the true CCDF.
-        --Pointwise approach based on Clopper-Pearson approach for estimating confidence intervals on the binomial distribution https://digitalcommons.wayne.edu/cgi/viewcontent.cgi?article=1132&context=jmasm
+        --Pointwise approach based on frequentist Clopper-Pearson approach for estimating confidence intervals on the binomial distribution https://digitalcommons.wayne.edu/cgi/viewcontent.cgi?article=1132&context=jmasm
         --Verified with examining dispersion of CDFs at each point.
     --Simultaneous approach will give bounds that the extrema of the CCDF will be within the range of the true CCDF i.e. 95% of the time.
         --Simultaneous approach based on Dvoretzky–Kiefer–Wolfowitz inequality which says the true CDF will lay in a range of +-sqrt(log(2/alpha)/(2*n)) of the empirical CDF with alpha confidence (alpha = 0.05 for 95% CI)
@@ -15,7 +15,7 @@
 
 -Original approach, Nir's approach, gives pointwise Bayesian confidence intervals.
     --Nir's approach assumes the data are treated as a "bag" from which data can be drawn randomly to estimate the current value of the errorbar.
-    --This approach can give negative errorbars at the edges, caused by an off-by-one error in the definition of p_low and p_hi in the thesis.
+    --Performs at basically the same level as the pointwise approach, though some future work might be done to consider which approach is technically correct for our applications.
     
 Citations:
     [1] Nir Friedman's thesis for Nir's method
@@ -40,20 +40,17 @@ def ccdf_errorbar(histy, ci = 0.95, method = 'pointwise'):
         case "simultaneous":
             fun = simultaneous_errorbars
         case "pointwise":
-            fun = pointwise_errorbars
+            fun = pointwise_errorbars #frequentist approach which does not require prior.
         case "nir":
-            fun = nir_errorbars
+            fun = nir_errorbars #bayesian approach with uniform priors
         case _:
             print("ERROR: Nethod must be either simultaneous, pointwise, or nir. Returning.")
             return np.array([-1]), np.array([-1])            
     return fun(histy, ci)
 
-#Calculates the Clopper-Pearson pointwise confidence band of the CCDF.
-#Corrects for an off-by-1 error on the calculation in Nir's thesis for p_high and p_low.
+#Calculates the frequentist Clopper-Pearson pointwise confidence band of the CCDF.
 #Use when figuring the dispersion each point may have individually from
 #the true CCDF and for collapses.
-
-#About 50% faster than the nir_errorbars function.
 def pointwise_errorbars(histy, ci = 0.95):    
     ci_bot = (1 - ci)/2
     ci_top = (1 + ci)/2
@@ -86,8 +83,6 @@ def pointwise_errorbars(histy, ci = 0.95):
     #convert to relative error
     top = top - histy
     bot = histy - bot
-    #errs_top_rel = errs_top - histy
-    #errs_bot_rel = histy - errs_bot
         
     return bot, top
 
@@ -128,9 +123,7 @@ def simultaneous_errorbars(histy, ci = 0.95):
     return errs_bot, errs_top
 
 
-#Jordan version of Alan's implementation of Nir's pointwise errorbar approach. Use ci = 0.95 to get 95% CI.
-#Prefer either pointwise or simultaneous errorbars, which have been tested on trial data.
-#approach is about 4x faster than Alan's implementation.
+#Jordan version of Nir's Bayesian pointwise errorbar approach. Use ci = 0.95 to get 95% CI.
 def nir_errorbars(histy, ci = 0.95):
 
     histy = np.array(histy)
@@ -140,10 +133,18 @@ def nir_errorbars(histy, ci = 0.95):
     ci_bot = (1 - ci)/2
     ci_top = (1 + ci)/2
     
+    num_successes = (1-histy)*N #Convert from CCDF to number of trials less than (or equal to if using scipy option) current number.
+    
     
     for i in range(N):
-        #point probability function approach. Less sensitive to solver.
-        errs_bot[i], errs_top[i] = scipy.stats.beta.interval(ci,N-i+2,i+2) 
+        n = num_successes[i]
+        
+        #using root_scalar to solve function (faster than scipy)
+        errs_top[i] = root_scalar(beta_fun_nir, args = (N,n, ci_top), bracket = [0,1]).root
+        errs_bot[i] = root_scalar(beta_fun_nir, args = (N,n, ci_bot), bracket = [0,1]).root
+        
+        #point probability function approach. Less sensitive to solver, but slower.
+        #errs_bot[i], errs_top[i] = scipy.stats.beta.interval(ci,n+1,N-n+1) 
         
         
         #incomplete beta function approach using minimize.
@@ -155,22 +156,26 @@ def nir_errorbars(histy, ci = 0.95):
         errs_top[i] = minimize_scalar(mybeta_top, bounds = (0,1), method = 'bounded').x#, method = 'Nelder-Mead').x
         errs_bot[i] = minimize_scalar(mybeta_bot, bounds = (0,1), method = 'bounded').x#, method = 'Nelder-Mead').x
         """
-        
-        
-    errs_top = errs_top - histy
-    errs_bot = histy - errs_bot
-    #print(errs_top)
     
-    errs_top=histy*(np.exp(errs_top/histy)-1)
-    errs_bot=histy*(-np.exp(-errs_bot/histy)+1)
+    #convert to CCDF errorbars
+    top = 1 - errs_bot
+    bot = 1 - errs_top
+        
+    #convert to relative error
+    top = top - histy
+    bot = histy - bot
     
-    return errs_bot, errs_top
+    #fix errorbars to be within 0 <= p <= 1
+    bot[bot < 0] = 0
+    top[top < 0] = 0
+    bot[histy-bot < 0] = histy[histy - bot < 0]
+    top[histy + top > 1] = (1-histy)[histy + top > 1]
+    #print('foo')
+    
+    return bot, top
 
-#works if all histy are unique. Use with minimize_scalar. Use with caution because it does not behave well!
-#Prefer to use beta_fun_pearson.
-def beta_fun(x,N,i,err):
-    v = betainc(N-i+1,i+1,x)
-    #return v*v-2*err*v + err*err #minimizing square of betainc function instead of abs(betainc)
+def beta_fun_nir(x,N,n_success,err):
+    v = betainc(n_success + 1,N - n_success + 1,x)
     return v - err
 
 
