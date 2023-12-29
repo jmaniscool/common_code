@@ -21,6 +21,10 @@ Citations:
     [1] Nir Friedman's thesis for Nir's method
     [2] For Clopper-Pearson pointwise confidence intervals, see https://digitalcommons.wayne.edu/cgi/viewcontent.cgi?article=1132&context=jmasm
     [3] For Dvoretzky-Kiefer-Wolfowitz simultaneous confidence intervals, see https://projecteuclid.org/journals/annals-of-probability/volume-18/issue-3/The-Tight-Constant-in-the-Dvoretzky-Kiefer-Wolfowitz-Inequality/10.1214/aop/1176990746.full
+    
+Further reading:
+    https://onlinelibrary.wiley.com/doi/10.1002/(SICI)1097-0258(19980430)17:8%3C857::AID-SIM777%3E3.0.CO;2-E
+    https://agupubs.onlinelibrary.wiley.com/doi/epdf/10.1029/2004JB003479
 
 """
 
