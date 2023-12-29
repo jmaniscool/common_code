@@ -101,7 +101,7 @@ def beta_hi_pearson(x,N,n_success,err):
 
 #calculate the simultaneous CCDF error bars. Use when estimating the possible
 #dispersion the empirical CCDF may have from the true CCDF 95% of the time.
-#This can be useful when fitting to an expected distribution.
+#This can be useful when fitting to an expected distribution, i.e. if you are trying to prove that a distribution could be pulled from a power law of particular exponent.
 def simultaneous_errorbars(histy, ci = 0.95):
     alpha = 1-ci
     epsilon = np.sqrt(np.log(2/alpha)/(2*len(histy)))
@@ -213,6 +213,8 @@ def ccdf_errorbars_alan(histY1,sigmas1):
     #finally find the difference to get the error bars
     errs_top=np.subtract(errs_top,histY)
     errs_bot=np.subtract(histY,errs_bot)
+    
+    #Jordan note: I don't think it's necessary to do this step, so it is not included in the more updated versions of the code above.
     errs_top=histY*(np.exp(errs_top/histY)-1)
     errs_bot=histY*(-np.exp(-errs_bot/histY)+1)
     return errs_top,errs_bot
