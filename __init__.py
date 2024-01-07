@@ -23,8 +23,8 @@ from .decorator import convert_to_times #just in case you need to tune for a fig
 from .decorator import optimal_colors
 from .decorator import optimal_colors12
 
-from .likelihoods import find_pl_fast as find_pl
-from .likelihoods import find_tpl_fast as find_tpl
+from .likelihoods import find_pl as find_pl
+from .likelihoods import find_tpl as find_tpl
 from .likelihoods import find_exp
 from .likelihoods import find_lognormal
 from .likelihoods import llr_wrap as llr
