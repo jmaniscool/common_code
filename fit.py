@@ -72,14 +72,14 @@ def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, ci
     yguess = func(x,*p1)
     
     #calculate the R^2 of the fit
-    if test == 'rsq' or 'Rsq' or 'r_squared' or 'R_squared' or 'r2' or 'R2':
+    if test == 'rsq' or test == 'Rsq' or test == 'r_squared' or test == 'R_squared' or test == 'r2' or test == 'R2':
         ybar = np.mean(y)
         sst = sum((y-ybar)**2)    
         ssres=sum((yguess-y)**2)    
         rsq = 1 - ssres/sst
         return p1,err,rsq
     
-    elif test == 'chi2' or 'Chi2' or 'chi_squared':
+    elif test == 'chi2' or test == 'Chi2' or test == 'chi_squared':
         chi_squared = np.sum(((y-yguess) / yguess) ** 2)
         
         pval = 1- stats.chi2.cdf(chi_squared,len(y)-len(p1))
