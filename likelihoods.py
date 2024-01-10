@@ -151,11 +151,13 @@ def tpl_like_fast(x,xmin,alpha,lam):
 
 #v2 use minimize_scalar to be about 3-4x faster than nelder-mead.
 def find_pl(x,xmin,xmax = 1e6):
-    mymean = lambda a: -pl_like(x,xmin,xmax,a)[0]
+    x = np.array(x)
+    xc = x[(x > xmin)*(x < xmax)]
+    mymean = lambda a: -pl_like(xc,xmin,xmax,a)[0]
     #myfit = optimize.minimize(mymean,2,method = 'Nelder-Mead', bounds = [(1,1e6)])
     myfit = optimize.minimize_scalar(mymean, bounds = (1,30))
     ll = -myfit.fun
-    alpha = myfit.x[0]
+    alpha = myfit.x
     return alpha,ll
 
 ##MLE FITS
