@@ -71,7 +71,7 @@ def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, ci
     #use * operator to unpack xp into a tuple for insertion into the function    
     yguess = func(x,*p1)
     
-    #calculate the R^2 of the fit
+    #calculate the R^2 of the fit.
     if test == 'rsq' or test == 'Rsq' or test == 'r_squared' or test == 'R_squared' or test == 'r2' or test == 'R2':
         ybar = np.mean(y)
         sst = sum((y-ybar)**2)    
@@ -80,9 +80,17 @@ def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, ci
         return p1,err,rsq
     
     elif test == 'chi2' or test == 'Chi2' or test == 'chi_squared':
-        chi_squared = np.sum(((y-yguess) / yguess) ** 2)
+        #note that chi2 is usually not a good choice for interpreting nonlinear fits. This is because a scaling factor on y can change the reported chi2.
+        #see https://arxiv.org/pdf/1012.3754.pdf
+        chi_squared = np.sum((y-yguess) ** 2)
+        
+        #TESTING: currently trying by testing the hypothesis that y-yguess should be normally distributed?
+        #chi_squared = np.sum((y-yguess)**2 / (np.var(y-yguess)))
+        #print(chi_squared)
         
         pval = 1- stats.chi2.cdf(chi_squared,len(y)-len(p1))
+        
+        
         if pval <= 1-ci:
             message = "Chi squared test suggests model does not fit data with p = %.2e less than pcrit = %.2e" % (pval, 1-ci)
         else:
@@ -90,8 +98,18 @@ def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, ci
         
         if print_chi2 == True:
             print(message)
+            
+        return p1, err, pval
+            
+    #note that chi2 is usually not a good choice for interpreting nonlinear fits. This is because a scaling factor on y can change the reported chi2.
+    #see https://arxiv.org/pdf/1012.3754.pdf
+    elif test == 'adjchi2' or test == 'adj_chi2' or test == 'adjusted_chi2' or test == 'adjusted chi2':
+        adjusted_chi_squared = np.sum((y-yguess)**2 / ((len(y)-len(p1)))) #using adjusted chi squared. Should be not too different from 1 for a reasonable fit. But, chi squared can be easily messed up by a scaling factor.
         
-        return p1,err,pval
+        #TESTING: currently trying by testing the hypothesis that y-yguess should be normally distributed?
+        #adjusted_chi_squared = np.sum((y-yguess)**2 / (np.var(y-yguess)*(len(y)-len(p1))))
+        
+        return p1,err,adjusted_chi_squared
     else:
         print("Error: Please input either chi2 or rsq for the test. Returning.")
         return -1,-1,-1
