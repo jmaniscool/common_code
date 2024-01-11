@@ -26,6 +26,8 @@ Variables:
         Thus, Jordan thinks the way to interpret the chi squared test is as follows:
             --if p < pcrit, the data are not drawn from the distribution given by the model.
             --if p > pcrit, the data MAY be drawn from the same distribution as the underlying model. A higher p value is not better evidence for this claim.
+    
+    sigma: a Nx1 vector of standard deviations. Will be used to weight the fit. If none are given, just use 1 for everything.
         
 @author: Jordan
 """
@@ -33,13 +35,20 @@ import numpy as np
 from scipy import optimize
 from matplotlib import pyplot as plt
 from scipy import stats
+import sklearn
 
-def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, ci = 0.95, test = 'rsq', print_chi2 = True):
+def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, sigma = None, ci = 0.95, test = 'rsq', print_chi2 = True):
 
     if xmin == None:
         xmin = min(xdata)
     if xmax == None:
         xmax = max(xdata)
+    
+    sigma_given = True
+        
+    if sigma is None:
+        sigma_given = False
+        sigma = np.ones(len(xdata))
         
     if (xmin > xmax) or (xmax < xmin):
         print("Error! Make sure xmin < xmax.")
@@ -52,6 +61,7 @@ def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, ci
     
     x = xdata[filt]
     y = ydata[filt]    
+    sigma = sigma[filt]
     
     z = stats.norm.ppf(1-ci/2) #get z score
     
@@ -65,18 +75,41 @@ def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, ci
     
     
     #use * operator to unpack xp into list of inputs for function, starting with x
-    p1, pcov = optimize.curve_fit(func,x,y)
+    if sigma_given == True:
+        p1, pcov = optimize.curve_fit(func,x,y, sigma = sigma, absolute_sigma = True)
+    else:
+        p1, pcov = optimize.curve_fit(func,x,y)
     err = z*np.diag(pcov)**0.5 #standard error on parameters is sqrt of diagnoal elements. Multiply by z-score to get CIs assuming normally distributed parameters.
 
     #use * operator to unpack xp into a tuple for insertion into the function    
     yguess = func(x,*p1)
     
+    
     #calculate the R^2 of the fit.
-    if test == 'rsq' or test == 'Rsq' or test == 'r_squared' or test == 'R_squared' or test == 'r2' or test == 'R2':
-        ybar = np.mean(y)
-        sst = sum((y-ybar)**2)    
-        ssres=sum((yguess-y)**2)    
-        rsq = 1 - ssres/sst
+    weights = 1/(sigma**2) #using standard weighting 1/Var(x)
+    
+    if test == 'rsq' or test == 'Rsq' or test == 'r_squared' or test == 'R_squared' or test == 'r2' or test == 'R2' or test == 'adjusted_rsq' or test == 'adj_rsq' or test == 'adj_Rsq':
+        
+        
+        
+        #something is wrong with this but I can't figure it out right now :(
+        """
+        ybar = np.average(y, weights = weights)
+        sst = np.sum(weights*(y-ybar)**2, dtype = np.float64)
+        ssres = np.sum(weights*(y-yguess)**2)
+        rsq = 1 - (ssres/sst)
+        """
+        
+        #instead, use sklearn since it's well-documented.
+        rsq = sklearn.metrics.r2_score(y,yguess, sample_weight = weights)
+        
+        #if adjusted, adjust using the normal definition.
+        if test == 'adjusted_rsq' or test == 'adj_rsq' or test == 'adj_Rsq':
+            k = len(p1)
+            n = len(y)
+            rsq = 1 - (1-rsq)*((n-1)/(n-k-1))
+        
+        
         return p1,err,rsq
     
     elif test == 'chi2' or test == 'Chi2' or test == 'chi_squared':
