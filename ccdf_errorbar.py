@@ -40,16 +40,15 @@ import scipy
 
 #Errorbar handling wrapper. Returns relative errorbar around each point. Default to pointwise.
 def ccdf_errorbar(histy, ci = 0.95, method = 'pointwise'):
-    match method:
-        case "simultaneous":
-            fun = simultaneous_errorbars
-        case "pointwise":
-            fun = pointwise_errorbars #frequentist approach which does not require prior.
-        case "nir":
-            fun = nir_errorbars #bayesian approach with uniform priors
-        case _:
-            print("ERROR: Nethod must be either simultaneous, pointwise, or nir. Returning.")
-            return np.array([-1]), np.array([-1])            
+    if method == "simultaneous":
+        fun = simultaneous_errorbars
+    elif method == "pointwise":
+        fun = pointwise_errorbars #frequentist approach which does not require prior.
+    elif method == "nir":
+        fun = nir_errorbars #bayesian approach with uniform priors
+    else:
+        print("ERROR: Nethod must be either simultaneous, pointwise, or nir. Returning.")
+        return np.array([-1]), np.array([-1])            
     return fun(histy, ci)
 
 #Calculates the frequentist Clopper-Pearson pointwise confidence band of the CCDF.
