@@ -120,7 +120,8 @@ import numpy as np
 from scipy import integrate
 import scipy
 from matplotlib import pyplot as plt
-import scipy
+from scipy import ndimage
+from scipy import stats
 import numba
 
 arr = np.array #shorthand for "array"
