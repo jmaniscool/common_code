@@ -35,8 +35,8 @@ import numpy as np
 from scipy import optimize
 from matplotlib import pyplot as plt
 from scipy import stats
-import sklearn
-import sklearn.metrics
+import scikit-learn
+import scikit-learn.metrics
 
 def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, sigma = None, ci = 0.95, test = 'rsq', print_chi2 = True):
 
@@ -102,7 +102,7 @@ def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, si
         """
         
         #instead, use sklearn since it's well-documented.
-        rsq = sklearn.metrics.r2_score(y,yguess, sample_weight = weights)
+        rsq = scikit-learn.metrics.r2_score(y,yguess, sample_weight = weights)
         
         #if adjusted, adjust using the normal definition.
         if test == 'adjusted_rsq' or test == 'adj_rsq' or test == 'adj_Rsq':
