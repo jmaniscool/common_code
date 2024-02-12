@@ -43,6 +43,63 @@ For more details, please read:
     
 """
 
+
+"""
+#using root_scalar
+attempted_xmins = np.zeros(10000)
+attempted_xmaxs = np.zeros(10000)
+attempted_alphas = np.zeros(10000)
+attempted_ds = np.zeros(10000)
+log_xmin = np.log(min(dats))
+log_xmax = np.log(max(dats))
+log_range = log_xmax-log_xmin
+for i in range(10000):
+    if (np.mod(i,100) == 0):
+        print(i)
+    trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
+    trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
+    while trial_xmax < 2*trial_xmin:        
+        trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
+        trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
+    trial_xmin = find_nearest(data,trial_xmin)
+    trial_xmax = find_nearest(data,trial_xmax)
+    trimmed = np.sort(data[(data >= trial_xmin)*(data <= trial_xmax)])
+    def wrap(ps):
+        return find_d(trimmed,trial_xmin,trial_xmax,ps)
+    alpha_hat = find_pl_exact(trimmed,trial_xmin,trial_xmax)
+    attempted_ds[i] = wrap(alpha_hat)
+    attempted_alphas[i] = alpha_hat
+    attempted_xmins[i] = trial_xmin
+    attempted_xmaxs[i] = trial_xmax
+    
+#using minimize()
+attempted_xmins = np.zeros(10000)
+attempted_xmaxs = np.zeros(10000)
+attempted_alphas = np.zeros(10000)
+attempted_ds = np.zeros(10000)
+log_xmin = np.log(min(dats))
+log_xmax = np.log(max(dats))
+log_range = log_xmax-log_xmin
+for i in range(10000):
+    print(i)
+    trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
+    trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
+    while trial_xmax < 2*trial_xmin:        
+        trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
+        trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
+    trial_xmin = find_nearest(data,trial_xmin)
+    trial_xmax = find_nearest(data,trial_xmax)
+    trimmed = np.sort(data[(data >= trial_xmin)*(data <= trial_xmax)])
+    def wrap(ps):
+        return find_d(trimmed,trial_xmin,trial_xmax,ps)
+    x = scipy.optimize.minimize(wrap,[3], method = 'Nelder-Mead')
+    attempted_ds[i] = x.fun
+    attempted_alphas[i] = x.x
+    attempted_xmins[i] = trial_xmin
+    attempted_xmaxs[i] = trial_xmax
+
+"""
+
 #my packages
 #from .j_powerlaw import j_powerlaw as jpl
 from .get_ccdf_arr import get_ccdf_arr as ccdf
@@ -70,6 +127,321 @@ mysqrt = np.vectorize(mp.sqrt)
 myerfc = np.vectorize(mp.erfc)
 myround = np.vectorize(round)
 myfloat = np.vectorize(float)
+
+##TESTING SUITE
+
+#find nearest value in an index. From StackOverflow.
+def find_nearest_idx(array, value):
+    array = np.asarray(array)
+    idx = (np.abs(array - value)).argmin()
+    return idx
+
+#ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
+def find_d_sorted(data, alpha):
+    if alpha <= 1:
+        return 1e12
+    #x = np.sort(data) #change to just data if the input data is sorted
+    x = data
+    xmin = x[0]
+    xmax = x[-1]
+
+    #test if we are in a reasonable range. If not, then the CDF is approximately a delta function either at x = xmin or x = xmax. Doesn't matter for KS distance which you choose. Return 1 as an approximation.
+    test_xmin = np.log10(xmin)*(-alpha+1)
+    if test_xmin > 100:
+        return 1
+    cdf_t = (x**(1-alpha) - xmin**(1-alpha))/(xmax**(1-alpha) - xmin**(1-alpha))
+    
+    ecdf = np.arange(1,len(x) + 1)/len(x) #empirical CDF = (1/N, 2/N, ... 1)
+    return np.amax(np.abs(ecdf-cdf_t))
+
+#ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
+#use PowerLaw D which is weighted to be more sensitive towards tails. Not as performant, but could be bugged.
+def find_dstar_sorted(data, alpha):
+    if alpha <= 1:
+        return 1e12
+    #x = np.sort(data) #change to just data if the input data is sorted
+    x = data
+    xmin = x[0]
+    xmax = x[-1]
+
+    #test if we are in a reasonable range. If not, then the CDF is approximately a delta function either at x = xmin or x = xmax. Doesn't matter for KS distance which you choose. Return 1 as an approximation.
+    test_xmin = np.log10(xmin)*(-alpha+1)
+    if test_xmin > 100:
+        return 1
+    cdf_t = (x**(1-alpha) - xmin**(1-alpha))/(xmax**(1-alpha) - xmin**(1-alpha))
+    cdf_t[0] = 1e-12 #set CDF close to 0 for first element
+    cdf_t[-1] = 1-1e-12 #set CDF close to 1 for last element
+    
+    ecdf = np.arange(1,len(x) + 1)/len(x) #empirical CDF = (1/N, 2/N, ... 1)
+    return np.amax(np.abs(ecdf-cdf_t)/np.sqrt(cdf_t*(1-cdf_t)))
+
+#using SciPy definition of A^2, see https://github.com/scipy/scipy/blob/v1.12.0/scipy/stats/_morestats.py#L2087-L2289
+#ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
+def find_ad_sorted(data,alpha):
+    ln = np.log
+    x = data
+    xmin = x[0]
+    xmax = x[-1]
+    
+    N = len(x)
+    if alpha <= 1:
+        return 1e12
+    
+    test_xmin = np.log10(xmin)*(-alpha+1)
+    if test_xmin > 100:
+        return 1e12
+    
+    idx = np.arange(1, N + 1)
+    
+    cdf = (x**(1-alpha) - xmin**(1-alpha))/(xmax**(1-alpha) - xmin**(1-alpha))
+    cdf[0] = 1e-12 #set CDF to be close to 0 for x close to xmin
+    cdf[-1] = 1-1e-12 #set cdf to be close to 1 for x close to xmax
+    ccdf = 1 - cdf #CCDF for PL
+    
+    A2 = -N - np.sum((2*idx - 1.0) / N * (ln(cdf) + ln(ccdf)[::-1]), axis=0)
+    
+    return A2
+
+#find the Kramer-Von Mises U value comparing between the empirical CDF and the power law cdf.
+#Works about as well as KS distance.
+def find_u_sorted(data,alpha):
+    #ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
+    ln = np.log
+    x = data
+    xmin = x[0]
+    xmax = x[-1]
+    if alpha <= 1:
+        return 1e12
+    
+    test_xmin = np.log10(xmin)*(-alpha+1)
+    if test_xmin > 100:
+        return 1e12
+    
+    def cdf(x):
+        return (x**(1-alpha) - xmin**(1-alpha))/(xmax**(1-alpha) - xmin**(1-alpha))
+    
+    return scipy.stats.cramervonmises(data,cdf)
+
+#ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
+#Use Kuiper statistic as the variable to minimize; may give sensitivity to tails and median.
+#See https://en.wikipedia.org/wiki/Kuiper%27s_test
+
+#Limited testing suggests that this is the best one! Requires at least ~1000 or so observations in the scaling regime to get good estimates of xmin or xmax.
+def find_v_sorted(data, alpha):
+    if alpha <= 1:
+        return 1e12
+    #x = np.sort(data) #change to just data if the input data is sorted
+    x = data
+    xmin = x[0]
+    xmax = x[-1]
+    
+    N = len(x)
+
+    #test if we are in a reasonable range. If not, then the CDF is approximately a delta function either at x = xmin or x = xmax. Doesn't matter for KS distance which you choose. Return 1 as an approximation.
+    test_xmin = np.log10(xmin)*(-alpha+1)
+    if test_xmin > 100:
+        return 1
+
+    cdf_t = (x**(1-alpha) - xmin**(1-alpha))/(xmax**(1-alpha) - xmin**(1-alpha))
+    
+    #D_plus = max(ecdf - cdf_t)
+    #D_minus = max(cdf_t - ecdf_reversed) #range on reverse eCDF is ((N-1)/N, (N-2)/N, ... 0)
+    
+    #from AstroPy
+    D = np.amax(cdf_t- np.arange(N) / float(N)) + np.amax(
+        (np.arange(N) + 1) / float(N) - cdf_t)
+    
+    return D
+    
+#TESTING HIGHER ORDERS OF KUIPER-LIKE STATISTICS.
+def find_v2_sorted(data, alpha):
+    if alpha <= 1:
+        return 1e12
+    #x = np.sort(data) #change to just data if the input data is sorted
+    x = data
+    xmin = x[0]
+    xmax = x[-1]
+    
+    N = len(x)
+
+    #test if we are in a reasonable range. If not, then the CDF is approximately a delta function either at x = xmin or x = xmax. Doesn't matter for KS distance which you choose. Return 1 as an approximation.
+    test_xmin = np.log10(xmin)*(-alpha+1)
+    if test_xmin > 100:
+        return 1
+    cdf_t = (x**(1-alpha) - xmin**(1-alpha))/(xmax**(1-alpha) - xmin**(1-alpha))
+    
+    ecdf = np.arange(1,len(x) + 1)/len(x) #empirical CDF = (1/N, 2/N, ... 1)
+    ecdf_reversed = np.arange(0,len(x)) #empirical CDF = ((N-1)/N, (N-2)/N, ... 0)
+    
+    #D_plus = max(ecdf - cdf_t)
+    #D_minus = max(cdf_t - ecdf_reversed) #range on reverse eCDF is ((N-1)/N, (N-2)/N, ... 0)
+    
+    dplus_srt = np.sort(cdf_t- np.arange(N) / float(N))
+    dminus_srt = np.sort((np.arange(N) + 1) / float(N) - cdf_t)
+    
+    #from AstroPy
+    D = dplus_srt[-1] + dminus_srt[-1] + dplus_srt[-2] + dminus_srt[-2] #something that feels kind of "quadratic"
+    
+    return D
+
+#find the power law index "exactly" using the zero of the derivative of the log likelihood function.
+#Works more quickly and over a broader range than scipy.minimize version.
+#ASSUME X IS SORTED AND IT GOES FROM XMIN TO XMAX INCLUSIVE
+
+#Agrees with MLE solution to "Truncated Pareto" distribution from Table 1 of https://pearl.plymouth.ac.uk/bitstream/handle/10026.1/1571/2013Humphries337081phd.pdf?sequence=1
+def find_pl_exact(x):
+    ln = np.log
+    xmin = x[0]
+    xmax = x[-1]
+    n = len(x)
+    S = np.sum(np.log(x))
+    
+    #using function values only speeds up calculation
+    def wrap(alpha):
+        if alpha == 1: #deal with asymptote. Limit goes to +inf with deriv -inf.
+            return 1e12#,-abs(alpha)*1e12
+        
+        #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
+        test_xmin = np.log10(xmin)*(-alpha+1)
+        if test_xmin > 100:
+            return -1e12
+        beta = -xmax**(-alpha+1) + xmin**(-alpha+1)
+        gam = xmax**(-alpha+1)*ln(xmax) - xmin**(-alpha+1)*ln(xmin)
+        
+        dgamdalpha = xmin**(-alpha+1)*(ln(xmin)**2)- xmax**(-alpha+1)*(ln(xmax)**2)
+        f = n/(alpha - 1) - S - n*(gam/beta)
+        #first derivative can be useful for more accurate convergence at cost of calculation speed.
+        df = -n/(alpha-1)**2 - n*(dgamdalpha/beta - (gam/beta)**2)
+        
+        return f#, df
+    
+    #if using first derivatives. Recommend not doing so for speed reasons.
+    #alpha = scipy.optimize.root_scalar(wrap, bracket = (1,100), fprime = True).root
+
+    alpha = scipy.optimize.root_scalar(wrap, bracket = (1, 100)).root
+    return alpha
+
+#From Clauset et al 2009, they test their method for determining xmin using a random variable sampled from
+#a continuous, differentiable, piecewise pdf which follows exp(-alpha*x) for x < xmin and a power law for x > xmax. The inverse CDF shown here can be used to generate synthetic data.
+def clauset_generate_test_data(x,xmin,alpha):
+    lam = (xmin/alpha)*(np.exp(alpha)-1)
+    eta = xmin/(alpha-1)
+    c_star = lam/(lam + eta)
+    
+    outs = np.zeros(len(x))
+    
+    for i in range(len(x)):
+        if x[i] < c_star:
+            outs[i] = xmin - (xmin/alpha)*np.log(np.exp(alpha) - (lam + eta)*alpha*x[i]/xmin)
+        else:
+            outs[i] = (eta/((lam + eta)*(1-x[i])))**(1/(alpha-1))*xmin
+            
+    return outs
+
+#Test finding data with xmin and xmax, where power law scaling is noted between xmin and xmax and goes exponential elsewhere.
+#Enforced continuity at boundaries of xmin and xmax.
+def generate_test_data_with_xmax(x,xmin,xmax,alpha):
+    
+    ln = np.log
+    exp = np.exp
+    
+    lam = xmin**(-alpha+1)*(np.exp(alpha) -1)/alpha
+    eta = (xmin**(-alpha+1) - xmax**(-alpha + 1))/(alpha-1)
+    gam = xmax**(-alpha + 1)/alpha
+    
+    co = 1/(lam + eta + gam)
+    
+    outs = np.zeros(len(x))
+    
+    c_star_lo = lam*co
+    c_star_hi = (lam + eta)*co
+    
+    for i in range(len(x)):
+        if x[i] < c_star_lo:
+            outs[i] = (xmin/alpha)*ln(exp(alpha)/(exp(alpha) - (alpha/co)*xmin**(alpha-1)*x[i]))
+        elif x[i] < c_star_hi:
+            outs[i] = (xmin**(-alpha + 1) + (alpha-1)*(lam - x[i]/co))**(1/(-alpha+1))
+        else:
+            outs[i] = xmax - (xmax/alpha)*ln(1-((x[i]/co)-lam-eta)*xmax**(alpha-1)*alpha)
+            
+    return outs
+    
+#use a monte carlo approach of finding xmin, xmax, and alpha using the minimum value of a statistic (any of KS, AD, or CM).
+#STRONGLY recommend using V, with KS being second. AD and CM appear to be too sensitive to tail behavior and have more variance.
+def find_pl_montecarlo(data, runs = 10000, distance = 'KS'):
+    if distance == 'KS':
+        #Second-best performing statistic. This is what's implemented in the PowerLaw library for finding xmin.
+        dfun = find_d_sorted
+    elif distance == 'AD':
+        #Should be more sensitive to tails, but ends up having high variance on estimates of xmin and xmax.
+        dfun = find_ad_sorted
+    elif distance == 'CM':
+        #
+        dfun = find_u_sorted
+    elif distance == 'V':
+        #Seems to be the best-performing estimator of xmin, xmax, and alpha based on so-far limited testing by Jordan as of 2-12-2024.
+        dfun = find_v_sorted
+    elif distance == 'V2':
+        #Testing with a higher-order Kuiper-like statistic (using more data). Currently does not outperform V.
+        dfun = find_v2_sorted
+    elif distance == 'Dstar':
+        #Testing a modified KS distance given in the PowerLaw paper (https://arxiv.org/pdf/0706.1062.pdf), though this is worst performing so far. Probably bugged.
+        dfun = find_dstar_sorted
+    else:
+        print('Error. Distance must be KS, V, AD, or CM.')
+        return 1,1,1
+    
+    data = np.sort(data)
+    
+    est_xmin = -1
+    est_xmax = -1
+    est_alpha = -1
+    
+    def wrap(ps):
+        if ps == 1:
+            return 1e12
+        return dfun(trimmed,ps)
+    
+    attempted_xmins = np.ones(runs)
+    attempted_xmaxs = np.ones(runs)
+    attempted_alphas = np.ones(runs)
+    attempted_ds = np.ones(runs)
+    log_xmin = np.log(min(data))
+    log_xmax = np.log(max(data))
+    log_range = log_xmax-log_xmin
+    for i in range(runs):
+        if (np.mod(i,1000) == 0):
+            print(i)
+        trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
+        trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
+        trial_xmin_idx = find_nearest_idx(data,trial_xmin)
+        trial_xmax_idx = find_nearest_idx(data,trial_xmax)
+        trial_xmin = data[trial_xmin_idx]
+        trial_xmax = data[trial_xmax_idx]
+        while (trial_xmax_idx - trial_xmin_idx < 10) + (trial_xmax < 2*trial_xmin):        
+            trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
+            trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
+            trial_xmin_idx = find_nearest_idx(data,trial_xmin)
+            trial_xmax_idx = find_nearest_idx(data,trial_xmax)
+            trial_xmin = data[trial_xmin_idx]
+            trial_xmax = data[trial_xmax_idx]
+        trimmed = data[trial_xmin_idx:trial_xmax_idx+1]
+        alpha_hat = find_pl_exact(trimmed)
+        attempted_ds[i] = wrap(alpha_hat)
+        attempted_alphas[i] = alpha_hat
+        attempted_xmins[i] = trial_xmin
+        attempted_xmaxs[i] = trial_xmax
+    
+    minidx = np.argmin(attempted_ds)
+    
+    xmin = attempted_xmins[minidx]
+    xmax = attempted_xmaxs[minidx]
+    alpha = attempted_alphas[minidx]
+    
+    return alpha, xmin, xmax
+    
+    
+    
 
 ##LIKELIHOOD FUNCTIONS
 

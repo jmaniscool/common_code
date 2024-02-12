@@ -35,8 +35,8 @@ import numpy as np
 from scipy import optimize
 from matplotlib import pyplot as plt
 from scipy import stats
-import scikit-learn
-import scikit-learn.metrics
+import sklearn
+import sklearn.metrics
 
 def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, sigma = None, ci = 0.95, test = 'rsq', print_chi2 = True):
 
