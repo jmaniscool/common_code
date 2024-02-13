@@ -320,9 +320,9 @@ def find_pl_exact_sorted(x):
     #if using first derivatives. Recommend not doing so for speed reasons.
     #alpha = scipy.optimize.root_scalar(wrap, bracket = (1,100), fprime = True).root
 
-    x = scipy.optimize.root_scalar(wrap, bracket = (1, 100))
-    alpha = x.root
-    ll = x.fun
+    out = scipy.optimize.root_scalar(wrap, bracket = (1, 100))
+    alpha = out.root
+    ll = pl_like(x,x[0],x[-1],alpha)[0]
     return alpha,ll
 
 #wrapper for find_pl which does not assume x is sorted and is in the range of xmin and xmax.
