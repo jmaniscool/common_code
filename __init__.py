@@ -23,6 +23,7 @@ from .decorator import convert_to_times #just in case you need to tune for a fig
 from .decorator import optimal_colors
 from .decorator import optimal_colors12
 
+from .likelihoods import find_pl_exact as find_pl_exact
 from .likelihoods import find_pl as find_pl
 from .likelihoods import find_tpl as find_tpl
 from .likelihoods import find_exp
@@ -32,3 +33,4 @@ from .likelihoods import bootstrap
 from .likelihoods import ad
 from .likelihoods import pl_gen
 from .likelihoods import tpl_gen
+from .likelihoods import find_pl_montecarlo as find_pl_montecarlo

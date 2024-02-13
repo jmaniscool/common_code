@@ -128,6 +128,8 @@ myerfc = np.vectorize(mp.erfc)
 myround = np.vectorize(round)
 myfloat = np.vectorize(float)
 
+arr = np.array
+
 ##TESTING SUITE
 
 #find nearest value in an index. From StackOverflow.
@@ -289,7 +291,7 @@ def find_v2_sorted(data, alpha):
 #ASSUME X IS SORTED AND IT GOES FROM XMIN TO XMAX INCLUSIVE
 
 #Agrees with MLE solution to "Truncated Pareto" distribution from Table 1 of https://pearl.plymouth.ac.uk/bitstream/handle/10026.1/1571/2013Humphries337081phd.pdf?sequence=1
-def find_pl_exact(x):
+def find_pl_exact_sorted(x):
     ln = np.log
     xmin = x[0]
     xmax = x[-1]
@@ -318,8 +320,17 @@ def find_pl_exact(x):
     #if using first derivatives. Recommend not doing so for speed reasons.
     #alpha = scipy.optimize.root_scalar(wrap, bracket = (1,100), fprime = True).root
 
-    alpha = scipy.optimize.root_scalar(wrap, bracket = (1, 100)).root
-    return alpha
+    x = scipy.optimize.root_scalar(wrap, bracket = (1, 100))
+    alpha = x.root
+    ll = x.fun
+    return alpha,ll
+
+#wrapper for find_pl which does not assume x is sorted and is in the range of xmin and xmax.
+def find_pl_exact(x,xmin,xmax = 1e6):
+    x = arr(x)
+    tmp = x[(x >= xmin)*(x <= xmax)]
+    alpha,ll = find_pl_exact_sorted(np.sort(tmp))
+    return alpha,ll
 
 #From Clauset et al 2009, they test their method for determining xmin using a random variable sampled from
 #a continuous, differentiable, piecewise pdf which follows exp(-alpha*x) for x < xmin and a power law for x > xmax. The inverse CDF shown here can be used to generate synthetic data.
@@ -426,7 +437,7 @@ def find_pl_montecarlo(data, runs = 10000, distance = 'KS'):
             trial_xmin = data[trial_xmin_idx]
             trial_xmax = data[trial_xmax_idx]
         trimmed = data[trial_xmin_idx:trial_xmax_idx+1]
-        alpha_hat = find_pl_exact(trimmed)
+        alpha_hat = find_pl_exact_sorted(trimmed)[0]
         attempted_ds[i] = wrap(alpha_hat)
         attempted_alphas[i] = alpha_hat
         attempted_xmins[i] = trial_xmin
@@ -756,7 +767,7 @@ Testing results:
 
 #speed this up
 #@nb.njit #jit fails
-def bootstrap(s,d,vm,smin,smax,dmin,dmax,num_runs = 10000,is_fixed = False, mytype = 'power_law',dex = 0.25, kic = ' ',min_events = 10,ctr_max = 10):
+def bootstrap(s,d,vm,smin,smax,dmin,dmax,num_runs = 10000,is_fixed = False, mytype = 'power_law_exact',dex = 0.25, kic = ' ',min_events = 10,ctr_max = 10):
     cursmin = -1
     cursmax = -1
     curdmin = -1
@@ -803,6 +814,8 @@ def bootstrap(s,d,vm,smin,smax,dmin,dmax,num_runs = 10000,is_fixed = False, myty
     tmpsp = -1
     if mytype == 'power_law':
         fun = find_pl_fast #set fun to be the power_law() function
+    if mytype == 'power_law_exact':
+        fun = find_pl_exact #get the exact solution
     elif mytype == 'truncated_power_law':
         fun = find_tpl #set fun to be the find_tpl() function instead
     else:
