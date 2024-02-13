@@ -222,7 +222,7 @@ def find_u_sorted(data,alpha):
     def cdf(x):
         return (x**(1-alpha) - xmin**(1-alpha))/(xmax**(1-alpha) - xmin**(1-alpha))
     
-    return scipy.stats.cramervonmises(data,cdf)
+    return scipy.stats.cramervonmises(data,cdf).statistic
 
 #ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
 #Use Kuiper statistic as the variable to minimize; may give sensitivity to tails and median.
