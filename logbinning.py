@@ -9,15 +9,20 @@ Updated July 27 2023 for speed
 """
 import numpy as np
 import numba
+import scipy #calculate the amount to multiply error by using normal distribution ppf
 
 arr = np.array
 
 #difference between this version and the older one is in where the first index is placed for the bin edge.
 #logbinning puts the first bin edge at unsorted_x[2], while logbinning2 puts the first bin edge at the smallest value larger than 0 (more correct).
 
+#V2: Update to have either standard error of the mean (SEM) or standard error (SE) based on the application.
+#Generally, prefer to use standard error of the mean because the error bar should describe how much the average value would change when binning data together on a logarithmic bin.
+#Furthermore, report 95% CI using Z-scores.
+
 #use matrix calculations, parallelization, and numba njit compiling to make this as fast as possible in Python. About 10-40x faster than logbinning, and a bit more accurate.
 @numba.njit(parallel = True)
-def logbinning(unsorted_x,unsorted_y,numBins):
+def logbinning_core(unsorted_x,unsorted_y,numBins, error_type = 'SEM'):
     
     #define outputs
     centers = np.zeros(numBins)
@@ -60,10 +65,18 @@ def logbinning(unsorted_x,unsorted_y,numBins):
         en = en + int(st == en)
         vals = y[st:en]
         out[i] = np.mean(vals)
-        errs[i] = np.std(vals)/np.sqrt(en-st) #SEM = std(X)/sqrt(N). N = en-st.
-        
+        if error_type == 'SEM':
+            errs[i] = np.std(vals)/np.sqrt(en-st) #SEM = std(X)/sqrt(N). N = en-st.
+        else:
+            errs[i] = np.std(vals) #standard error = std(X)
         
     return centers,out,errs
+
+def logbinning(unsorted_x,unsorted_y, numBins, error_type = 'SEM', ci = 0.68):
+    centers, out, errs = logbinning_core(unsorted_x,unsorted_y, numBins, error_type = error_type)
+    
+    z = np.sqrt(2)*scipy.stats.norm.ppf((1 + ci)/2)
+    return centers, out, errs*z
     
 
 """
