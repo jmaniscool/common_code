@@ -298,6 +298,10 @@ def find_pl_exact_sorted(x):
     n = len(x)
     S = np.sum(np.log(x))
     
+    #if not enough data, return a nan value
+    if xmax/xmin < 1.5:
+        return np.nan, -1e12
+    
     #using function values only speeds up calculation
     def wrap(alpha):
         if alpha == 1: #deal with asymptote. Limit goes to +inf with deriv -inf.
@@ -320,7 +324,12 @@ def find_pl_exact_sorted(x):
     #if using first derivatives. Recommend not doing so for speed reasons.
     #alpha = scipy.optimize.root_scalar(wrap, bracket = (1,100), fprime = True).root
 
+#    try:
     out = scipy.optimize.root_scalar(wrap, bracket = (1, 100))
+#    except ValueError:
+#        print('Value error!')
+#        print(x)
+#        return np.nan, -1e12
     alpha = out.root
     ll = pl_like(x,x[0],x[-1],alpha)[0]
     return alpha,ll
@@ -762,6 +771,205 @@ Testing results:
 
 """
 
+#get a new random xmin_star and xmax_star which varies over -dex to dex in log scale and ensures xmin < xmax.
+#note that ensuring xmin > xmax makes the "random" value of xmax be covariant with xmin.
+def logrand(xmin,xmax,dex):
+    #if dex is zero, xmin and xmax do not change.
+    if dex == 0:
+        return xmin,xmax
+    logxmin = np.log10(xmin)
+    logxmax = np.log10(xmax)
+    
+    logxmin_star = np.random.uniform(-dex + logxmin, dex + logxmin) #get log(xmin) to vary between -dex and +dex
+    #ensure smax > smin while keeping sampling uniform
+    logxmax_star = np.random.uniform(max([-dex + logxmax, logxmin_star]), dex + logxmax) #log(xmax_star) varies between -dex and dex if logxmin_star < -dex + logsmax_star, otherwise log(xmax_star) varies between logxmin_star and +dex
+    
+    xmin_star = 10**logxmin_star
+    xmax_star = 10**logxmax_star
+    return xmin_star, xmax_star
+
+#find ymin and ymax from an interpolated function over logx,logy. Default to 50 log bins.
+def loginterp(x,y,xmin,xmax, bins = 50):
+    bx,by,_ = logbinning(x,y,bins)
+    
+    logbx = np.log10(bx)
+    logby = np.log10(by)
+    
+    myinterp = interp1d(logbx,logby)
+    lo = max([np.log10(xmin),min(logbx)])
+    hi = min([np.log10(xmax),max(logbx)])
+    
+    logymin = myinterp(lo)
+    logymax = myinterp(hi)
+    
+    ymin = 10**logymin
+    ymax = 10**logymax
+    return ymin,ymax
+
+#using logbinned data to speed up calculations.
+def binned_interp(bx,myinterp,xmin,xmax):
+    logbx = np.log10(bx)
+    lo = max([np.log10(xmin),min(logbx)])
+    hi = min([np.log10(xmax),max(logbx)])
+    
+    logymin = myinterp(lo)
+    logymax = myinterp(hi)
+    
+    ymin = 10**logymin
+    ymax = 10**logymax
+    return ymin,ymax
+    
+
+#bootstrapping core. From an input list of avalanche s,d,smin,smax,etc, estimate a single run of exponents.
+def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fun, dex, ctr_max,myinterp):
+    
+    length = len(s)
+    nums = 0
+    numd = 0
+    numv = 0
+    ctr = 0
+    
+    #initialize variable values if ctr exceeds ctr_max and bootstrap needs to exit.
+    tau = np.nan
+    alpha = np.nan
+    mu = np.nan
+    
+    snz = np.nan
+    sp = np.nan
+    pnz = np.nan
+    
+    sdlhs = np.nan #(tau-1)/(alpha-1)
+    svlhs = np.nan #(tau-1)/(mu-1)
+    dvlhs = np.nan #(alpha-1)/(mu-1)
+
+    #if vm is not input, vmin and vmax should stay equal to 1.    
+    vmin_star = 1
+    vmax_star = 1
+    
+    
+    #try to get enough events to bootstrap over (at least 1.)
+    while (ctr <= ctr_max)*((nums < 1) + (numd < 1) + (numv < 1)):    
+        idxs = np.random.randint(0,length,length) #get indexes of avalanches to sample
+        smin_star,smax_star = logrand(smin,smax,dex) #get random smin and smax, ensuring smax > smin    
+        dmin_star,dmax_star = logrand(dmin,dmax,dex) #get random dmin and dmax, ensuring dmax > dmin
+        
+        sc = s[idxs] #get list of sampled avalanche size, duration, velocity and their logs
+        dc = d[idxs]
+        vmc = vm[idxs]    
+        logsc = logs[idxs]
+        logdc = logd[idxs]    
+        logvmc = logvm[idxs]
+        
+        #if vmin and vmax are something other than 1, estimate vm statistics.
+        if (vmin != 1)*(vmax != 1):
+            vmin_star,vmax_star = logrand(vmin,vmax,dex) #get random vmin and vmax, ensuring vmax > vmin        
+            #vmin_star,vmax_star = binned_interp(sc,myinterp,smin_star,smax_star)
+            
+        nums = sum((sc >= smin_star)*(sc <= smax_star))
+        numd = sum((dc >= dmin_star)*(dc <= dmax_star))
+        numv = sum((vmc >= vmin_star)*(vmc <= vmax_star))
+        ctr = ctr + 1
+        
+    #if the loop exited because ctr == ctr_max, return nans.
+    if ctr >= ctr_max:
+        return tau,alpha,mu, sdlhs,svlhs,dvlhs, snz,sp,pnz
+
+    #otherwise, continue on.
+    scc = sc[(sc >= smin_star)*(sc <= smax_star)]
+    dcc = dc[(dc >= dmin_star)*(dc <= dmax_star)]
+    vmcc = vmc[(vmc >= vmin_star)*(vmc <= vmax_star)]
+    
+    logscc = logsc[(sc >= smin_star)*(sc <= smax_star)]
+    logdcc = logdc[(sc >= smin_star)*(sc <= smax_star)]
+    logvmcc = logvmc[(sc >= smin_star)*(sc <= smax_star)]
+    
+    #old if statement. Was required to check if xmin < xmax for all x and that len(xcc) >= 3 for all of s, d, and vm, and that all values are different.
+    #using find_pl_exact, these checks are not required.
+    #ctr < ctr_max and (cursmin >= cursmax or curdmin >= curdmax or len(scc) <= 3 or len(dcc) <= 3 or len(vmcc) <= 3 or all(scc == scc[0]*np.ones(len(scc))) or all(dcc == dcc[0]*np.ones(len(dcc))) or all(vmcc == vmcc[0]*np.ones(len(vmcc))))
+
+    #find tau and alpha
+    tau = fun(scc,smin_star,smax_star)[0]
+    alpha = fun(dcc, dmin_star,dmax_star)[0]
+    
+    #find snz and (tau-1)/(alpha-1)
+    snz = scipy.stats.linregress(logscc,logdcc).slope
+    sdlhs = (tau-1)/(alpha-1)
+    
+    #if vm is given, also calculate velocity statistics.
+    if (vmin != 1)*(vmax != 1):
+        mu = fun(vmcc,vmin_star,vmax_star)[0]
+        sp = scipy.stats.linregress(logscc,logvmcc).slope
+        pnz = scipy.stats.linregress(logdcc,logvmcc).slope
+        svlhs = (tau-1)/(mu-1)
+        dvlhs = (alpha-1)/(mu-1)
+    
+    
+    return tau,alpha,mu, sdlhs,svlhs,dvlhs, snz,sp,pnz
+    
+
+#v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written.
+def bootstrap2(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype = 'power_law_exact', dex = 0.25, ctr_max = 10, min_events = 10):
+    
+    #ctr_max is the max number of times to try reshuffling before skipping a particular run.
+    taus = np.array([np.nan]*num_runs)
+    alphas = np.array([np.nan]*num_runs)
+    sdlhss = np.array([np.nan]*num_runs)
+
+    mus = np.array([np.nan]*num_runs) #exponent on vmax CCDF
+    svlhss = np.array([np.nan]*num_runs) #relationship (tau-1)/(mu-1)
+    dvlhss = np.array([np.nan]*num_runs) #relationship (alpha-1)/(mu-1)
+    
+    snzs = np.array([np.nan]*num_runs)
+    sps = np.array([np.nan]*num_runs) #vmax vs size power law exponent
+    pnzs = np.array([np.nan]*num_runs) #vmax vs duration power law exponent (rho)/(nu*z)
+
+    num_avs = len(s)
+    
+    #hold log of s and d so it doesnt have to be recalculated every run
+    logs = np.log10(s)
+    logd = np.log10(d)
+    if vm is None:
+        vm = np.ones(num_avs)
+        vmin = 1
+        vmax = 1
+        myinterp = None
+    else:
+        vmin,vmax = loginterp(s,vm,smin,smax, bins = 50) #use for independent vm dex selection, which leads to unreasonably large error bars since vm should have such a small scaling regime most of the time.
+        
+        bs,bv,_ = logbinning(s,vm,50)
+        myinterp = interp1d(np.log10(bs),np.log10(bv))
+        #vmin,vmax = binned_interp(bs,myinterp,smin,smax)
+        
+
+    logvm = np.log10(vm)
+    
+    
+    #if there are fewer than min_events number of events in s or d, return.
+    if sum((s >= smin)*(s <= smax)) <= min_events or sum((d >= dmin)*(d <= dmax)) <= min_events:
+        print("Not enough events. Returning.")
+        return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
+    
+    if mytype == 'power_law':
+        fun = find_pl_fast #set fun to be the power_law() function
+    elif mytype == 'power_law_exact':
+        fun = find_pl_exact #get the exact solution. Preferred.
+    elif mytype == 'truncated_power_law':
+        fun = find_tpl #set fun to be the find_tpl() function instead. Not tested.
+    else:
+        print('Wrong option for function, please choose any of power_law, power_law_exact, or truncated_power_law. Returning.')
+        return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
+    
+    #do the bootstrapping (serial)
+    for i in range(num_runs):
+        if i % 1000 == 0:
+            print(i)
+        taus[i],alphas[i],mus[i],sdlhss[i],svlhss[i],dvlhss[i],snzs[i],sps[i],pnzs[i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max, myinterp)
+    
+    #return values    
+    return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
+    
+    
+
 #vm = vector of max velocities. The expected scaling relationship is (tau-1)/(mu-1) = sp for vm vs size
 #The expected scaling relationship is (alpha-1)/(mu-1) = p/(nz) for vm vs duration
 
@@ -814,7 +1022,7 @@ def bootstrap(s,d,vm,smin,smax,dmin,dmax,num_runs = 10000,is_fixed = False, myty
     tmpsp = -1
     if mytype == 'power_law':
         fun = find_pl_fast #set fun to be the power_law() function
-    if mytype == 'power_law_exact':
+    elif mytype == 'power_law_exact':
         fun = find_pl_exact #get the exact solution
     elif mytype == 'truncated_power_law':
         fun = find_tpl #set fun to be the find_tpl() function instead
@@ -988,7 +1196,7 @@ def boot_multi(s,d,vm,smin,smax,dmin,dmax,num_runs = 10000,is_fixed = False, myt
 #get the confidence intervals from the array of bootstrapped values.
 #95% confidence interval is default. That is, 95% of values are going to be in range
 #(lo,hi)
-def confidence_intervals(vals,ci = 95):
+def confidence_intervals(vals,ci = 0.95):
     ci = 100 - ci
     mu = np.nanmedian(vals)
     lo = np.nanpercentile(vals,ci/2)
