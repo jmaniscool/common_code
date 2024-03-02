@@ -119,6 +119,8 @@ from scipy.interpolate import interp1d
 from scipy.stats import chi2
 from scipy import optimize
 import time
+import multiprocessing as multi
+import os
 
 #vectorized operations
 mylog = np.vectorize(mp.log)
@@ -879,6 +881,7 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     dcc = dc[(dc >= dmin_star)*(dc <= dmax_star)]
     vmcc = vmc[(vmc >= vmin_star)*(vmc <= vmax_star)]
     
+    #all bounds are chosen wrt smin to ensure there is the same number of events in each array. Known source of potential value dependence.
     logscc = logsc[(sc >= smin_star)*(sc <= smax_star)]
     logdcc = logdc[(sc >= smin_star)*(sc <= smax_star)]
     logvmcc = logvmc[(sc >= smin_star)*(sc <= smax_star)]
@@ -906,9 +909,12 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     
     return tau,alpha,mu, sdlhs,svlhs,dvlhs, snz,sp,pnz
     
+#multiprocessing helper function
+def worker(index, ins, taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs):
+    return index, bootstrap_core(*ins)
 
 #v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written.
-def bootstrap2(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype = 'power_law_exact', dex = 0.25, ctr_max = 10, min_events = 10):
+def bootstrap2(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype = 'power_law_exact', dex = 0.25, ctr_max = 10, min_events = 10, parallel = False):
     
     #ctr_max is the max number of times to try reshuffling before skipping a particular run.
     taus = np.array([np.nan]*num_runs)
@@ -959,15 +965,170 @@ def bootstrap2(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype 
         print('Wrong option for function, please choose any of power_law, power_law_exact, or truncated_power_law. Returning.')
         return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
     
-    #do the bootstrapping (serial)
-    for i in range(num_runs):
-        if i % 1000 == 0:
-            print(i)
-        taus[i],alphas[i],mus[i],sdlhss[i],svlhss[i],dvlhss[i],snzs[i],sps[i],pnzs[i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max, myinterp)
+    #do the bootstrapping (serial). A bit slower than the original bootstrapping approach.
+    if not parallel:
+        for i in range(num_runs):
+            if i % 1000 == 0:
+                print(i)
+            taus[i],alphas[i],mus[i],sdlhss[i],svlhss[i],dvlhss[i],snzs[i],sps[i],pnzs[i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max, myinterp)
+            
+        return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
+    #otherwise, it's parallel.        
+    pool = multi.Pool(os.cpu_count())
+    ins = (s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max, myinterp)
     
+    #using apply_async (2x speedup on 6-core computer)
+    results = [pool.apply_async(worker, args=(i, ins, taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs)) for i in range(num_runs)]
+    
+    for result in results:
+        i, val = result.get()
+        taus[i] = val[0]
+        alphas[i] = val[1]
+        mus[i] = val[2]
+        sdlhss[i] = val[3]
+        svlhss[i] = val[4]
+        dvlhss[i] = val[5]
+        snzs[i] = val[6]
+        sps[i] = val[7]
+        pnzs[i] = val[8]
+    
+    # Close the pool to free resources
+    pool.close()
+    pool.join()
+
     #return values    
     return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
+
+#the core of the BCa correction given theta_hat and jackknifed samples theta_jk. Validated against scipy.stats.bootstrap.
+def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
     
+    z0 = scipy.stats.norm.ppf((np.sum(bootstrap_estimates < theta_hat) + 0.5) / (len(bootstrap_estimates) + 1))
+
+    #NOTE: the numdat term drops out algebraically, so I am unsure why it's there in the SciPy implementation (shown below)
+    #numdat = len(theta_jk)
+    #top = np.sum(theta_jk**3/numdat**3)
+    #bot = np.sum(theta_jk**2/numdat**2)
+    #a_hat = top/(6*bot**(3/2))
+    
+    #SciPy implementation of acceleration estimation with numdat removed.
+    #Definition agrees with Efron's bootstrapping book
+    top = np.sum(theta_jk**3)
+    bot = np.sum(theta_jk**2)
+    a_hat = top/(6*bot**(3/2))
+    
+    #confidence interval assuming normality
+    z_alpha = scipy.stats.norm.ppf(alpha / 2)
+    z1_alpha = scipy.stats.norm.ppf(1 - alpha / 2)
+    
+    # Correct z-score with BCa adjustment
+    z_bca1 = z0 + (z0 + z_alpha) / (1 - a_hat * (z0 + z_alpha))
+    z_bca2 = z0 + (z0 + z1_alpha) / (1 - a_hat * (z0 + z1_alpha))
+
+    #Obtain the lower and upper alpha values
+    alpha_1 = scipy.special.ndtr(z_bca1)
+    alpha_2 = scipy.special.ndtr(z_bca2)
+    
+    #obtain the confidence interval from the bootstrap estimates. Ignore nans.
+    ci_lower = np.nanpercentile(bootstrap_estimates,alpha_1*100)
+    ci_upper = np.nanpercentile(bootstrap_estimates,alpha_2*100)
+    return theta_hat, ci_lower, ci_upper
+    
+#Find the bias corrected and accelerated (BCa) confidence intervals for power law exponents from the bootstrapping function.
+#Returns the true value of the statistic and its lower and upper confidence intervals given output from bootstrap function.
+#Method validated against scipy.stats.bootstrap with BCa selected.
+def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95):    
+    alpha = 1-ci #get alpha (e.g. confidence interval of 95% means alpha = 0.05)
+    
+    #compute the "true" value of theta
+    xc = x[(x >= xmin)*(x <= xmax)]
+    theta_hat = find_pl_exact(xc,xmin,xmax)[0]    
+    
+    #Jackknife estimation of acceleration (from Scipy)
+    numdat = len(xc)
+    theta_jk = np.zeros(numdat)
+    for i in range(numdat):
+        theta_jk[i] = find_pl_exact(np.delete(xc,i),xmin,xmax)[0]
+
+    #calculate    
+    return bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha)
+
+#compute the BCA confidence intervals for combined statistics. i.e. like (tau-1)/(alpha-1)
+def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95):
+    alpha = 1-ci
+    
+    xc = x[(x >= xmin)*(x <= xmax)]
+    yc = y[(y >= ymin)*(y <= ymax)]
+    
+    thetax_hat = find_pl_exact(xc,xmin,xmax)[0]
+    thetay_hat = find_pl_exact(yc,ymin,ymax)[0]
+
+    #get the mean value of (tau-1)/(alpha-1)
+    theta_hat = (thetax_hat - 1)/(thetay_hat - 1)
+    
+    nx = len(xc)
+    ny = len(yc)
+    
+    #The real way would be to jackknife over avalanches.
+    #That is, remove avalanches (1) one by one (remove same index i,j), (2) compute xc and yc from xmin, xmax, ymin, ymax, (3) compute tau, alpha from the subsample
+    
+    #assuming samples of x and y are independent (they're not! But the resampling in bootstrapping assumes s,d,etc are independent)
+    ""
+    #jackknife over thetax
+    thetax_jk = np.zeros(nx)
+    for i in range(nx):
+        thetax_jk[i] = find_pl_exact(np.delete(xc,i),xmin,xmax)[0]
+    
+    #jackknife over thetay
+    thetay_jk = np.zeros(ny)
+    for i in range(ny):
+        thetay_jk[i] = find_pl_exact(np.delete(yc,i),ymin,ymax)[0]
+        
+    #get the total jackknife (??)
+    theta_jk = np.zeros(nx*ny)
+    for i in range(nx):
+        for j in range(ny):
+            theta_jk[int(j*nx + i)] = (thetax_jk[i] - 1)/(thetay_jk[j] - 1) #compute (tau-1)/(alpha-1) for all jackknifed nx and ny, taking advantage of independence of x and y
+        
+    ""
+    return bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha)
+
+#Do BCa on fitted functions (i.e. like snz)
+def bca_fit(x,y,xmin,xmax,bootstrap_estimates,ci = 0.95):
+    alpha = 1-ci
+    
+    
+    xc = x[(x>= xmin)*(x <= xmax)]
+    yc = y[(x >= xmin)*(x <= xmax)]
+    
+    logxc = np.log10(xc)
+    logyc = np.log10(yc)
+
+    theta_hat = scipy.stats.linregress(logxc,logyc).slope
+    
+    nx = len(xc)
+    theta_jk = np.zeros(nx)
+    for i in range(nx):
+        theta_jk[i] = scipy.stats.linregress(np.delete(logxc,i),np.delete(logyc,i)).slope
+        
+    return bca_core(theta_hat,theta_jk,bootstrap_estimates,alpha)
+
+#calculate the BCa confidence interval for a given type, given a set of bootstrap estimates from bootstrap().
+def bca(x,xmin,xmax, bootstrap_estimates, mytype = 'power_law', y = None, ymin = None, ymax = None, ci = 0.95):
+    
+    if mytype == 'power_law':
+        return bca_pl(x,xmin,xmax,bootstrap_estimates, ci = ci)
+    #for all options below this, y, ymin, and ymax must be given.
+    if y is None:
+        print("error. For mytype == fit or mytype == lhs, please give both x and y and their corresponding ymin, ymax.")
+        return 1,1,1    
+    if mytype == 'fit':
+        return bca_fit(x,y,xmin,xmax,bootstrap_estimates, ci = ci)
+    if mytype == 'lhs':
+        return bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci= ci)
+
+    #if it's gotten to this point, the option is incorrect.
+    print('Error. Please input mytype == power_law, lhs, or fit.')
+    return 1,1,1
     
 
 #vm = vector of max velocities. The expected scaling relationship is (tau-1)/(mu-1) = sp for vm vs size

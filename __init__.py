@@ -30,6 +30,7 @@ from .likelihoods import find_exp
 from .likelihoods import find_lognormal
 from .likelihoods import llr_wrap as llr
 from .likelihoods import bootstrap
+from .likelihoods import bca
 from .likelihoods import bootstrap2 as bootstrap_test
 from .likelihoods import ad
 from .likelihoods import pl_gen
