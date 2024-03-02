@@ -1004,17 +1004,21 @@ def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
     
     z0 = scipy.stats.norm.ppf((np.sum(bootstrap_estimates < theta_hat) + 0.5) / (len(bootstrap_estimates) + 1))
 
+    #SciPy implementation of BCa.
     #NOTE: the numdat term drops out algebraically, so I am unsure why it's there in the SciPy implementation (shown below)
-    #numdat = len(theta_jk)
-    #top = np.sum(theta_jk**3/numdat**3)
-    #bot = np.sum(theta_jk**2/numdat**2)
+    #top = np.sum((theta_jk_dot - theta_jk)**3)/numdat**3)
+    #bot = np.sum((theta_jk_dot - theta_jk)**2)/numdat**2)
     #a_hat = top/(6*bot**(3/2))
     
-    #SciPy implementation of acceleration estimation with numdat removed.
-    #Definition agrees with Efron's bootstrapping book
-    top = np.sum(theta_jk**3)
-    bot = np.sum(theta_jk**2)
+
+    #Equation 14.15 on pp. 186 of "An Introduction to the Bootstrap" by Efron and Tibshirani implementation
+    #validated against test data given in the book. For test data a = [48, 36, 20, 29, 42, 42, 20, 42, 22, 41, 45, 14,6, 0, 33, 28, 34, 4, 32, 24, 47, 41, 24, 26, 30,41]
+    #given on pp. 180, a_hat should equal 0.61 (given in pp. 186). Formula below gives correct answer.
+    theta_jk_dot = np.mean(theta_jk)
+    top = np.sum((theta_jk_dot - theta_jk)**3)
+    bot = np.sum((theta_jk_dot - theta_jk)**2)
     a_hat = top/(6*bot**(3/2))
+
     
     #confidence interval assuming normality
     z_alpha = scipy.stats.norm.ppf(alpha / 2)
