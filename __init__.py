@@ -29,9 +29,9 @@ from .likelihoods import find_tpl as find_tpl
 from .likelihoods import find_exp
 from .likelihoods import find_lognormal
 from .likelihoods import llr_wrap as llr
-from .likelihoods import bootstrap
+from .likelihoods import bootstrap as bootstrap_old
 from .likelihoods import bca
-from .likelihoods import bootstrap2 as bootstrap_test
+from .likelihoods import bootstrap2 as bootstrap
 from .likelihoods import ad
 from .likelihoods import pl_gen
 from .likelihoods import tpl_gen
