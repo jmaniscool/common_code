@@ -681,19 +681,19 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
     dists = [None]*2
     for i in range(len(totest)):
         if totest[i] == 'power_law':
-            print('pl')
+            #print('pl')
             findfuns[i] = find_pl
             llrfuns[i] = pl_like
         if totest[i] == 'truncated_power_law':
-            print('tpl')
+            #print('tpl')
             findfuns[i] = find_tpl
             llrfuns[i] = tpl_like
         if totest[i] == 'exponential':
-            print('exp')
+            #print('exp')
             findfuns[i] = find_exp
             llrfuns[i] = exp_like
         if totest[i] == 'lognormal':
-            print('ln')
+            #print('ln')
             findfuns[i] = find_lognormal
             llrfuns[i] = lognormal_like
         opts[i] = findfuns[i](x,xmin,xmax)[:-1]
@@ -1519,8 +1519,8 @@ def ad(s,d,smin,smax,dmin,dmax):
     dcm = d[(d >= dmin)]
 
     #power law
-    tau_pl = find_pl_fast(sc,smin,smax)
-    alpha_pl = find_pl_fast(dc,dmin,dmax)
+    tau_pl = find_pl_exact(sc,smin,smax)
+    alpha_pl = find_pl_exact(dc,dmin,dmax)
     
     #truncated power law (no xmax!)
     tau_tpl = find_tpl(scm,smin)
