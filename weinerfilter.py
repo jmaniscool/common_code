@@ -14,6 +14,55 @@ import math
 import scipy.io as io
 from matplotlib import pyplot as plt
 
+#find amplitude for the weiner filter (Aya's code called this as just A = power[fixfreq])
+#calculate it as the geometric mean of the values within 50 indices of the idx_freq
+def find_amplitude(psd,idx_freq,relative_window = 50):
+    logpsd = np.log(psd)
+    n = len(logpsd)
+    lo = int(idx_freq - relative_window//2)
+    if lo < 0:
+        lo = 0
+    hi = int(idx_freq + relative_window//2)
+    if hi > n:
+        hi = n
+    
+    logA = np.mean(logpsd[lo:hi])
+    
+    return np.exp(logA)
+
+#Jordan updated weiner filter Apr 12, 2024.
+#Re-writing it to be in terms of frequency units and to get a better estimate of the filter amplitude.
+#Previous version had fixfreq as the Nth index in the frequency vector, i.e. at f = f_s*(fixfreq/(2N)) where N is the length of the data.
+def weinerfilter_core(noise,unfiltered, fixfreq, exponent, fs = 1,relative_window = 50):
+    unfil_fourier=np.fft.rfft(unfiltered)
+    noise_fourier=np.fft.rfft(noise)
+    
+    N = len(unfiltered)
+    
+    freq = np.fft.rfftfreq(N,d = 1/fs)
+    
+    psd = np.abs(unfil_fourier)**2
+    npsd = np.abs(noise_fourier)**2
+    
+    idx_freq = np.argmax(freq > fixfreq) #THIS IS WHAT FIXFREQ IS IN AYA'S CODE
+    
+    A = find_amplitude(psd,idx_freq,relative_window = relative_window)
+    
+    #note: this is an "ideal" signal which intersects with the data at idx_freq.
+    ideal_sig = A*((idx_freq+1)**exponent)*(np.arange(1.0,len(unfil_fourier)+1)**(-exponent))
+    
+    weiner_coefficents=1/(1+np.absolute(noise_fourier)**2/ideal_sig)
+    weiner_coefficents[0]=1
+    #We now scale the signal by these values, decreasing the higher frequencies
+    #based on their inclusion in the noise
+    fil_fourier=weiner_coefficents*unfil_fourier
+    #Finally we inverse fourier transorm to get a filtered signal. The ifft may
+    #sometimes leave small amounts of imaginary components due to rounding error,
+    #this is taken out by taking the real portion.
+    filtered= np.fft.irfft(fil_fourier)
+    
+    return filtered
+
 #when the noise file is shorter than the data, split the data into chunks and
 #filter each part individually.
 def weinerfilter_wrap(noise, unfiltered,fixedfreq,exponent):
