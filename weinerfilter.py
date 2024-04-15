@@ -51,7 +51,7 @@ def weinerfilter_core(noise,unfiltered, fixfreq, exponent, fs = 1,relative_windo
     #note: this is an "ideal" signal which intersects with the data at idx_freq.
     ideal_sig = A*((idx_freq+1)**exponent)*(np.arange(1.0,len(unfil_fourier)+1)**(-exponent))
     
-    weiner_coefficents=1/(1+np.absolute(noise_fourier)**2/ideal_sig)
+    weiner_coefficents=1/(1+np.abs(noise_fourier)**2/ideal_sig)
     weiner_coefficents[0]=1
     #We now scale the signal by these values, decreasing the higher frequencies
     #based on their inclusion in the noise
@@ -63,9 +63,34 @@ def weinerfilter_core(noise,unfiltered, fixfreq, exponent, fs = 1,relative_windo
     
     return filtered
 
+def weinerfilter_wrap(noise, unfiltered, fixfreq, exponent, fs = 1, relative_window = 50):
+    filtered = []
+    noiselength = len(noise)
+    datalength = len(unfiltered)
+    nsegs = int(np.ceil(datalength/noiselength))
+    seglength = datalength
+    if nsegs == 1:
+        filtered = weinerfilter_core(noise[:seglength],unfiltered,fixfreq,exponent,fs = fs, relative_window = relative_window)
+        return np.array(filtered)
+    
+    #in this case, the noise is shorter than the data.
+    seglength = noiselength
+    #if nsegs is greater than 1, do the first (n-1) segments normally before truncating the final one.
+    for i in range(nsegs):
+        idxst = i*seglength
+        idxen = (i+1)*seglength
+        #if the final segment, set idxen to be -1
+        if i == nsegs - 1:
+            idxen = -1
+        tmp = weinerfilter_core(noise[idxst:idxen],unfiltered[idxst:idxen],fixfreq,exponent,fs = fs, relative_window = relative_window)
+        filtered.append(list(tmp))    
+        
+    return np.array(filtered)
+
 #when the noise file is shorter than the data, split the data into chunks and
 #filter each part individually.
-def weinerfilter_wrap(noise, unfiltered,fixedfreq,exponent):
+#old version which uses older weinerfilter code
+def weinerfilter_wrap_old(noise, unfiltered,fixedfreq,exponent):
     
     filtered = []
     noiseLen = len(noise)
