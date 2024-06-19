@@ -141,6 +141,7 @@ def find_nearest_idx(array, value):
     return idx
 
 #ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
+#Validated against https://doi.org/10.2478/s11600-013-0154-9 on 6-12-24, though the way they define the CDF goes from 1 to 0 and thus some algebra is required to get the same result as below.
 def find_d_sorted(data, alpha):
     if alpha <= 1:
         return 1e12
@@ -293,6 +294,7 @@ def find_v2_sorted(data, alpha):
 #ASSUME X IS SORTED AND IT GOES FROM XMIN TO XMAX INCLUSIVE
 
 #Agrees with MLE solution to "Truncated Pareto" distribution from Table 1 of https://pearl.plymouth.ac.uk/bitstream/handle/10026.1/1571/2013Humphries337081phd.pdf?sequence=1
+#TODO: find if we can replace root finding with https://github.com/Nicholaswogan/NumbaMinpack?
 def find_pl_exact_sorted(x):
     ln = np.log
     xmin = x[0]
@@ -343,6 +345,12 @@ def find_pl_exact(x,xmin,xmax = 1e6):
     alpha,ll = find_pl_exact_sorted(np.sort(tmp))
     return alpha,ll
 
+#used to estimate the pq value from D in the monte carlo xmin/xmax
+def expfun(x,numterms = 5):
+    val = 0
+    for i in range(1,numterms+1):
+        val = val + (-1)**(i-1)*np.exp(-2* i**2)
+
 #From Clauset et al 2009, they test their method for determining xmin using a random variable sampled from
 #a continuous, differentiable, piecewise pdf which follows exp(-alpha*x) for x < xmin and a power law for x > xmax. The inverse CDF shown here can be used to generate synthetic data.
 def clauset_generate_test_data(x,xmin,alpha):
@@ -388,9 +396,12 @@ def generate_test_data_with_xmax(x,xmin,xmax,alpha):
             
     return outs
     
-#use a monte carlo approach of finding xmin, xmax, and alpha using the minimum value of a statistic (any of KS, AD, or CM).
-#STRONGLY recommend using V, with KS being second. AD and CM appear to be too sensitive to tail behavior and have more variance.
-def find_pl_montecarlo(data, runs = 10000, distance = 'KS'):
+#use a monte carlo approach of finding xmin, xmax, and alpha using KS statistic.
+#TODO: speed this up using python ctypes or jit compilation
+def find_pl_montecarlo(data, runs = 10000, pcrit = 0.35):
+
+    #depreciated as of 6-12-24, for testing different statistics.
+    """
     if distance == 'KS':
         #Second-best performing statistic. This is what's implemented in the PowerLaw library for finding xmin.
         dfun = find_d_sorted
@@ -412,21 +423,22 @@ def find_pl_montecarlo(data, runs = 10000, distance = 'KS'):
     else:
         print('Error. Distance must be KS, V, AD, or CM.')
         return 1,1,1
+    """
     
-    data = np.sort(data)
-    
-    est_xmin = -1
-    est_xmax = -1
-    est_alpha = -1
+    data = np.sort(data)    
+    dfun = find_d_sorted
     
     def wrap(ps):
         if ps == 1:
             return 1e12
         return dfun(trimmed,ps)
     
+    #As of 6-12-24, use an updated method that searches for any with pq > 0.35 (gives p approx 0.15 or so) then selects the run that maximizes xmax/xmin
     attempted_xmins = np.ones(runs)
     attempted_xmaxs = np.ones(runs)
     attempted_alphas = np.ones(runs)
+    attempted_ns = np.ones(runs)
+    attempted_ps = np.ones(runs)
     attempted_ds = np.ones(runs)
     log_xmin = np.log(min(data))
     log_xmax = np.log(max(data))
@@ -450,17 +462,57 @@ def find_pl_montecarlo(data, runs = 10000, distance = 'KS'):
         trimmed = data[trial_xmin_idx:trial_xmax_idx+1]
         alpha_hat = find_pl_exact_sorted(trimmed)[0]
         attempted_ds[i] = wrap(alpha_hat)
+        attempted_ns[i] = len(trimmed)
         attempted_alphas[i] = alpha_hat
         attempted_xmins[i] = trial_xmin
         attempted_xmaxs[i] = trial_xmax
     
-    minidx = np.argmin(attempted_ds)
+    #Depreciated as of 6-12-24. The best index is found as the one that maximizes xmax/xmin while being above pq > pcrit
+    #minidx = np.argmin(attempted_ds)
     
-    xmin = attempted_xmins[minidx]
-    xmax = attempted_xmaxs[minidx]
-    alpha = attempted_alphas[minidx]
+    #Function is Equation 29 in Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9)
+    #gives a "fake p" that correlates with the real p
+    attempted_ps = expfun(attempted_ds*np.sqrt(attempted_ns) + 0.12*attempted_ds + 0.11*attempted_ds/np.sqrt(attempted_ns))
+    idxs = np.where(attempted_ps > pcrit)[0]
+    possible_xmins = attempted_xmins[idxs]
+    possible_xmaxs = attempted_xmaxs[idxs]
+    possible_alphas = attempted_alphas[idxs]
+    possible_ps = attempted_ps[idxs]
     
-    return alpha, xmin, xmax
+    minidx = np.argmax(possible_xmaxs/possible_xmins)
+    
+    xmin = possible_xmins[minidx]
+    xmax = possible_xmaxs[minidx]
+    alpha = possible_alphas[minidx]
+    
+    #the "false" p-value from equation 29 of (https://doi.org/10.2478/s11600-013-0154-9).
+    pq = possible_ps[minidx]
+    
+    return alpha, xmin, xmax, pq
+
+#find the true p value (as compared to pq). See Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9).
+#If true p > 0.15 (or maybe p > 0.2), then the power law fit is good.
+def find_true_p(x,xmin,xmax,runs = 1000):
+    
+    tot = 0
+    x = np.sort(x)
+    x = x[(x >= xmin)*(x <= xmax)]
+    alpha = find_pl_exact(x,xmin,xmax)[0]
+    de = find_d_sorted(x,xmin,xmax)
+    for i in range(runs):
+        rands = np.random.rand(len(x))
+        synth = np.sort(pl_gen(rands,xmin,xmax,alpha))
+        asynth = find_pl_exact(synth,xmin,xmax)[0]
+        ds = find_d_sorted(synth,asynth)
+        tot = tot + (ds > de) #if ds > de, increment tot
+        
+    p = tot/runs
+    sigp = np.sqrt(p*(1-p)/runs) #1 sigma (68% CI)
+    
+    
+    
+    return p,sigp
+    
     
     
     
