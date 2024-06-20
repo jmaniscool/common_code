@@ -14,7 +14,7 @@ Variables:
 
     xmin: minimum x value to consider.
     ymin: minimum y value to consider.
-    ci: the confidence interval to report errors for, where
+    ci: the confidence interval to report errors for, where ci = 0.95 represents the 95% confidence interval
     test: either 'Rsq' or 'chi2'. Rsq for R-squared test (good for linear models), and chi2 for chi-squared test.
         IMPORTANT NOTE: According to some people, a high p-value on the chi2 test is evidence that the data is described by the model,
         though Jordan believes that this is a misrepresentation of the concept of p values. The purpose of any
@@ -30,6 +30,8 @@ Variables:
     sigma: a Nx1 vector of standard deviations. Will be used to weight the fit. If none are given, just use 1 for everything.
         
 @author: Jordan
+
+Bug in confidence interval calculation fixed by Ethan
 """
 import numpy as np
 from scipy import optimize
@@ -64,7 +66,7 @@ def fit(xdata,ydata,func = lambda x,p0,p1: p0*x+p1, xmin = None, xmax = None, si
     y = ydata[filt]    
     sigma = sigma[filt]
     
-    z = stats.norm.ppf(1-ci/2) #get z score
+    z = stats.norm.ppf((1+ci)/2) #get z score (should be 1.96 for 95% CI)
     
         
     #old filter
