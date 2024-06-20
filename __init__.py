@@ -5,7 +5,8 @@ from .shapes import shapes
 from .weinerfilter import weinerfilter_wrap as weinerfilter
 from .logbinning import logbinning
 #from .scaling_gui_v3 import scaling_gui #defunct for now
-from .get_ccdf_arr import get_ccdf_arr as ccdf
+from .get_ccdf_arr import ccdf as ccdf #Ethan's updated ccdf function which works better for larger data.
+from .get_ccdf_arr import ccdf_unique as ccdf_unique #New function for if unique values in the CCDF are found
 from .ccdf_errorbar import ccdf_errorbar
 from .decorator import figure_decorator
 from .generate_noise import generate_noise
