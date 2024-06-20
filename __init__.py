@@ -13,6 +13,7 @@ from .generate_noise import generate_noise
 from .autofilter import autofilter
 
 from .culling import culling
+from .linemaker import linemaker #ethan's linemaker function, added 6-20-24
 
 #constants
 from .decorator import smallfont
