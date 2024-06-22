@@ -38,3 +38,4 @@ from .likelihoods import ad
 from .likelihoods import pl_gen
 from .likelihoods import tpl_gen
 from .likelihoods import find_pl_montecarlo as find_pl_montecarlo
+from .likelihoods import generate_test_data_with_xmax as generate_test_data

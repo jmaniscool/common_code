@@ -43,63 +43,6 @@ For more details, please read:
     
 """
 
-
-"""
-#using root_scalar
-attempted_xmins = np.zeros(10000)
-attempted_xmaxs = np.zeros(10000)
-attempted_alphas = np.zeros(10000)
-attempted_ds = np.zeros(10000)
-log_xmin = np.log(min(dats))
-log_xmax = np.log(max(dats))
-log_range = log_xmax-log_xmin
-for i in range(10000):
-    if (np.mod(i,100) == 0):
-        print(i)
-    trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
-    trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
-    while trial_xmax < 2*trial_xmin:        
-        trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
-        trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
-    trial_xmin = find_nearest(data,trial_xmin)
-    trial_xmax = find_nearest(data,trial_xmax)
-    trimmed = np.sort(data[(data >= trial_xmin)*(data <= trial_xmax)])
-    def wrap(ps):
-        return find_d(trimmed,trial_xmin,trial_xmax,ps)
-    alpha_hat = find_pl_exact(trimmed,trial_xmin,trial_xmax)
-    attempted_ds[i] = wrap(alpha_hat)
-    attempted_alphas[i] = alpha_hat
-    attempted_xmins[i] = trial_xmin
-    attempted_xmaxs[i] = trial_xmax
-    
-#using minimize()
-attempted_xmins = np.zeros(10000)
-attempted_xmaxs = np.zeros(10000)
-attempted_alphas = np.zeros(10000)
-attempted_ds = np.zeros(10000)
-log_xmin = np.log(min(dats))
-log_xmax = np.log(max(dats))
-log_range = log_xmax-log_xmin
-for i in range(10000):
-    print(i)
-    trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
-    trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
-    while trial_xmax < 2*trial_xmin:        
-        trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
-        trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
-    trial_xmin = find_nearest(data,trial_xmin)
-    trial_xmax = find_nearest(data,trial_xmax)
-    trimmed = np.sort(data[(data >= trial_xmin)*(data <= trial_xmax)])
-    def wrap(ps):
-        return find_d(trimmed,trial_xmin,trial_xmax,ps)
-    x = scipy.optimize.minimize(wrap,[3], method = 'Nelder-Mead')
-    attempted_ds[i] = x.fun
-    attempted_alphas[i] = x.x
-    attempted_xmins[i] = trial_xmin
-    attempted_xmaxs[i] = trial_xmax
-
-"""
-
 #my packages
 #from .j_powerlaw import j_powerlaw as jpl
 from .get_ccdf_arr import get_ccdf_arr as ccdf
@@ -121,6 +64,7 @@ from scipy import optimize
 import time
 import multiprocessing as multi
 import os
+import numba
 
 #vectorized operations
 mylog = np.vectorize(mp.log)
@@ -135,6 +79,7 @@ arr = np.array
 ##TESTING SUITE
 
 #find nearest value in an index. From StackOverflow.
+@numba.njit
 def find_nearest_idx(array, value):
     array = np.asarray(array)
     idx = (np.abs(array - value)).argmin()
@@ -142,6 +87,9 @@ def find_nearest_idx(array, value):
 
 #ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
 #Validated against https://doi.org/10.2478/s11600-013-0154-9 on 6-12-24, though the way they define the CDF goes from 1 to 0 and thus some algebra is required to get the same result as below.
+
+#try the jited version
+@numba.njit
 def find_d_sorted(data, alpha):
     if alpha <= 1:
         return 1e12
@@ -349,7 +297,9 @@ def find_pl_exact(x,xmin,xmax = 1e6):
 def expfun(x,numterms = 5):
     val = 0
     for i in range(1,numterms+1):
-        val = val + (-1)**(i-1)*np.exp(-2* i**2)
+        val = val + (-1)**(i-1)*np.exp(-2* i**2 * x**2)
+        
+    return val
 
 #From Clauset et al 2009, they test their method for determining xmin using a random variable sampled from
 #a continuous, differentiable, piecewise pdf which follows exp(-alpha*x) for x < xmin and a power law for x > xmax. The inverse CDF shown here can be used to generate synthetic data.
@@ -395,9 +345,116 @@ def generate_test_data_with_xmax(x,xmin,xmax,alpha):
             outs[i] = xmax - (xmax/alpha)*ln(1-((x[i]/co)-lam-eta)*xmax**(alpha-1)*alpha)
             
     return outs
+
+#find the alpha using Brent's algorithm. This version is about 10x faster than the previous approach and gives the same answer, thanks to numba
+#Gives same results as Scipy version which uses a c backend as implemented at https://github.com/scipy/scipy/blob/v1.13.1/scipy/optimize/Zeros/brentq.c
+#Fortran version that's slightly different is implemented in https://websites.pmc.ucsc.edu/~fnimmo/eart290c_17/NumericalRecipesinF77.pdf.
+@numba.njit
+def brent_findmin(x,blo = 1 + 1e-5, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-16, maxiter = 100):
+    ln = np.log
+    x = np.sort(x)
+    xmin = x[0]
+    xmax = x[-1]
+    n = len(x)
+    S = np.sum(np.log(x))
+    def f(alpha):
+        #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
+        test_xmin = np.log10(xmin)*(-alpha+1)
+        if test_xmin > 100:
+            return -1e12
+        beta = -xmax**(-alpha+1) + xmin**(-alpha+1)
+        gam = xmax**(-alpha+1)*ln(xmax) - xmin**(-alpha+1)*ln(xmin)
+        y = n/(alpha - 1) - S - n*(gam/beta)
+        
+        return y
+    
+    #hold previous, current, and blk (?) values
+    xpre = blo #previous estimate of the root
+    xcur = bhi #current estimate of the root
+    xblk = 0 #holds value of x (?)
+    fpre = f(xpre)
+    fcur = f(xcur)
+    fblk = 0 #hold value of f(x) (?)
+
+    #s values
+    spre = 0 #previous step size
+    scur = 0 #current step size
+    sbis = 0 #bisect
+    stry = 0
+    
+    #d values
+    dpre = 0
+    dblk = 0
+    
+    delta = 0 #hold the value of the error
+    
+    #edge case calculation
+    if fpre == 0:
+        return xpre
+    if fcur == 0:
+        return xcur
+    tol1 = -1
+    
+    #main loop
+    for i in range(maxiter):
+        #if fpre and fcur are both not zero and fpre has a different sign from fcur
+        if ((fpre != 0)*(fcur != 0)*(np.sign(fpre) != np.sign(fcur))):
+            xblk = xpre
+            fblk = fpre
+            spre = scur = xcur - xpre #put xpre and fpre into xblk and fblk, set spre = scur = xcur - xpre
+            
+        #if fblk is less than fcur, then move the bracket to (xpre, xblk)
+        if abs(fblk) < abs(fcur):
+            xpre = xcur
+            xcur = xblk
+            xblk = xpre
+            
+            fpre = fcur
+            fcur = fblk
+            fblk = fpre
+        
+        #check the bounds
+        delta = 0.5*(xtol + rtol*abs(xcur))
+        sbis = 0.5*(xblk - xcur)
+        if ((fcur == 0) + (abs(sbis) < delta)):
+            #print('Root found in %d iterations.' % i)
+            return xcur
+        
+        if (abs(spre) > delta)*(abs(fcur) < abs(fpre)):
+            if xpre == xblk:
+                stry = -fcur*(xcur - xpre)/(fcur - fpre)
+            else:
+                dpre = (fpre - fcur)/(xpre - xcur)
+                dblk = (fblk - fcur)/(xblk - xcur)
+                stry = -fcur*(fblk*dblk - fpre*dpre)/(dblk*dpre*(fblk - fpre))
+            #short step
+            if (2*abs(stry) < abs(spre)) * (2*abs(stry) < 3*abs(sbis) - delta):
+                spre = scur
+                scur = stry
+            #otherwise bisect
+            else:
+                spre = sbis
+                scur = sbis
+        else:
+            #otherwise bisect
+            spre = sbis
+            scur = sbis
+
+        xpre = xcur
+        fpre = fcur
+        if abs(scur) > delta:
+            xcur = xcur + scur #step xcur by scur
+        else:
+            xcur = xcur + np.sign(sbis)*delta
+        
+        fcur = f(xcur) #another function call
+    
+    #print('Max iters achieved.')
+    return xcur
     
 #use a monte carlo approach of finding xmin, xmax, and alpha using KS statistic.
 #TODO: speed this up using python ctypes or jit compilation
+#@numba.njit
 def find_pl_montecarlo(data, runs = 10000, pcrit = 0.35):
 
     #depreciated as of 6-12-24, for testing different statistics.
@@ -427,6 +484,7 @@ def find_pl_montecarlo(data, runs = 10000, pcrit = 0.35):
     
     data = np.sort(data)    
     dfun = find_d_sorted
+    #dfun = find_ad_sorted
     
     def wrap(ps):
         if ps == 1:
@@ -440,12 +498,12 @@ def find_pl_montecarlo(data, runs = 10000, pcrit = 0.35):
     attempted_ns = np.ones(runs)
     attempted_ps = np.ones(runs)
     attempted_ds = np.ones(runs)
-    log_xmin = np.log(min(data))
-    log_xmax = np.log(max(data))
+    log_xmin = np.log(data[0])
+    log_xmax = np.log(data[-1])
     log_range = log_xmax-log_xmin
     for i in range(runs):
-        if (np.mod(i,1000) == 0):
-            print(i)
+        #if (np.mod(i,1000) == 0):
+        #    print(i)
         trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
         trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
         trial_xmin_idx = find_nearest_idx(data,trial_xmin)
@@ -460,7 +518,7 @@ def find_pl_montecarlo(data, runs = 10000, pcrit = 0.35):
             trial_xmin = data[trial_xmin_idx]
             trial_xmax = data[trial_xmax_idx]
         trimmed = data[trial_xmin_idx:trial_xmax_idx+1]
-        alpha_hat = find_pl_exact_sorted(trimmed)[0]
+        alpha_hat = brent_findmin(trimmed)
         attempted_ds[i] = wrap(alpha_hat)
         attempted_ns[i] = len(trimmed)
         attempted_alphas[i] = alpha_hat
