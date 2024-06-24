@@ -257,9 +257,9 @@ def find_pl_exact_sorted(x):
     
     #using function values only speeds up calculation
     def wrap(alpha):
-         #test for alpha = 1
-         if alpha == 1:
-             return -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
+        #test for alpha = 1
+        if alpha == 1:
+            return -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
         
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
@@ -279,7 +279,7 @@ def find_pl_exact_sorted(x):
     #alpha = scipy.optimize.root_scalar(wrap, bracket = (1,100), fprime = True).root
 
 #    try:
-    out = scipy.optimize.root_scalar(wrap, bracket = (1, 100))
+    out = scipy.optimize.root_scalar(wrap, bracket = (1, 20))
 #    except ValueError:
 #        print('Value error!')
 #        print(x)
