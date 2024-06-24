@@ -301,7 +301,7 @@ def expfun(x,numterms = 5):
     for i in range(1,numterms+1):
         val = val + (-1)**(i-1)*np.exp(-2* i**2 * x**2)
         
-    return val
+    return 2*val
 
 #From Clauset et al 2009, they test their method for determining xmin using a random variable sampled from
 #a continuous, differentiable, piecewise pdf which follows exp(-alpha*x) for x < xmin and a power law for x > xmax. The inverse CDF shown here can be used to generate synthetic data.
