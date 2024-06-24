@@ -130,6 +130,7 @@ def find_dstar_sorted(data, alpha):
 
 #using SciPy definition of A^2, see https://github.com/scipy/scipy/blob/v1.12.0/scipy/stats/_morestats.py#L2087-L2289
 #ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
+@numba.njit
 def find_ad_sorted(data,alpha):
     ln = np.log
     x = data
@@ -256,8 +257,9 @@ def find_pl_exact_sorted(x):
     
     #using function values only speeds up calculation
     def wrap(alpha):
-        if alpha == 1: #deal with asymptote. Limit goes to +inf with deriv -inf.
-            return 1e12#,-abs(alpha)*1e12
+        #deal with asymptote. Closed form solution from Deluca & Corrall 2013, equation 12.
+        if alpha == 1:
+            return -ln(ln(xmax/xmin)) + S
         
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
@@ -266,10 +268,10 @@ def find_pl_exact_sorted(x):
         beta = -xmax**(-alpha+1) + xmin**(-alpha+1)
         gam = xmax**(-alpha+1)*ln(xmax) - xmin**(-alpha+1)*ln(xmin)
         
-        dgamdalpha = xmin**(-alpha+1)*(ln(xmin)**2)- xmax**(-alpha+1)*(ln(xmax)**2)
+        #dgamdalpha = xmin**(-alpha+1)*(ln(xmin)**2)- xmax**(-alpha+1)*(ln(xmax)**2)
         f = n/(alpha - 1) - S - n*(gam/beta)
         #first derivative can be useful for more accurate convergence at cost of calculation speed.
-        df = -n/(alpha-1)**2 - n*(dgamdalpha/beta - (gam/beta)**2)
+        #df = -n/(alpha-1)**2 - n*(dgamdalpha/beta - (gam/beta)**2)
         
         return f#, df
     
@@ -350,7 +352,7 @@ def generate_test_data_with_xmax(x,xmin,xmax,alpha):
 #Gives same results as Scipy version which uses a c backend as implemented at https://github.com/scipy/scipy/blob/v1.13.1/scipy/optimize/Zeros/brentq.c
 #Fortran version that's slightly different is implemented in https://websites.pmc.ucsc.edu/~fnimmo/eart290c_17/NumericalRecipesinF77.pdf.
 @numba.njit
-def brent_findmin(x,blo = 1 + 1e-5, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-16, maxiter = 100):
+def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-16, maxiter = 100):
     ln = np.log
     x = np.sort(x)
     xmin = x[0]
@@ -358,6 +360,9 @@ def brent_findmin(x,blo = 1 + 1e-5, bhi = 20, xtol = 1e-12, rtol = 8.88178419700
     n = len(x)
     S = np.sum(np.log(x))
     def f(alpha):
+        #test for alpha = 1
+        if alpha == 1:
+            return -ln(ln(xmax/xmin)) + S #equation from Deluca & Corrall 2013, equation 12.
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
         if test_xmin > 100:
@@ -371,10 +376,10 @@ def brent_findmin(x,blo = 1 + 1e-5, bhi = 20, xtol = 1e-12, rtol = 8.88178419700
     #hold previous, current, and blk (?) values
     xpre = blo #previous estimate of the root
     xcur = bhi #current estimate of the root
-    xblk = 0 #holds value of x (?)
+    #xblk = 0 #holds value of x (?)
     fpre = f(xpre)
     fcur = f(xcur)
-    fblk = 0 #hold value of f(x) (?)
+    #fblk = 0 #hold value of f(x) (?)
 
     #s values
     spre = 0 #previous step size
@@ -453,9 +458,8 @@ def brent_findmin(x,blo = 1 + 1e-5, bhi = 20, xtol = 1e-12, rtol = 8.88178419700
     return xcur
     
 #use a monte carlo approach of finding xmin, xmax, and alpha using KS statistic.
-#TODO: speed this up using python ctypes or jit compilation
 #@numba.njit
-def find_pl_montecarlo(data, runs = 10000, pcrit = 0.35):
+def find_pl_montecarlo(data, runs = 3000, pcrit = 0.35):
 
     #depreciated as of 6-12-24, for testing different statistics.
     """
@@ -562,7 +566,7 @@ def find_true_p(x,xmin,xmax,runs = 1000):
         synth = np.sort(pl_gen(rands,xmin,xmax,alpha))
         asynth = find_pl_exact(synth,xmin,xmax)[0]
         ds = find_d_sorted(synth,asynth)
-        tot = tot + (ds > de) #if ds > de, increment tot
+        tot = tot + (ds >= de) #if ds > de, increment tot
         
     p = tot/runs
     sigp = np.sqrt(p*(1-p)/runs) #1 sigma (68% CI)
