@@ -257,9 +257,9 @@ def find_pl_exact_sorted(x):
     
     #using function values only speeds up calculation
     def wrap(alpha):
-        #deal with asymptote. Closed form solution from Deluca & Corrall 2013, equation 12.
-        if alpha == 1:
-            return -ln(ln(xmax/xmin)) + S
+         #test for alpha = 1
+         if alpha == 1:
+             return -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
         
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
@@ -362,7 +362,7 @@ def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-1
     def f(alpha):
         #test for alpha = 1
         if alpha == 1:
-            return -ln(ln(xmax/xmin)) + S #equation from Deluca & Corrall 2013, equation 12.
+            return -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
         if test_xmin > 100:
