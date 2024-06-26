@@ -81,7 +81,6 @@ arr = np.array
 #find nearest value in an index. From StackOverflow.
 @numba.njit
 def find_nearest_idx(array, value):
-    array = np.asarray(array)
     idx = (np.abs(array - value)).argmin()
     return idx
 
@@ -486,10 +485,6 @@ def find_true_p(x,xmin,xmax,runs = 150, dfun = find_d_sorted):
     return p,sigp
     
 #use a monte carlo approach of finding xmin, xmax, and alpha using KS statistic.
-#Set the default pcrit to 0.45, since that corresponds to a true p of approx 0.2 and gives very good reliability in testing.
-
-#Cannot njit because you can't assign a function to a variable name in nopython mode.
-#@numba.njit
 def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 150, dist_type = 'KS'):
     """
     Use a Monte Carlo approach to find xmin,xmax, and alpha using KS statistics.
@@ -504,15 +499,18 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 15
     """
     
     data = np.sort(data) 
+    dfun = find_d_sorted
+    defaults = [1,0,0,0,0]
     if dist_type == 'KS':
         dfun = find_d_sorted
     elif dist_type == 'AD':
         dfun = find_ad_sorted
     else:
         print('Error. Please input a valid distance type (either KS or AD)')
-        return 1, 0, 0, 0, 0
-    
+        return defaults
+
     #As of 6-12-24, use an updated method that searches for any with pq > 0.35 (gives p approx 0.15 or so) then selects the run that maximizes xmax/xmin
+    #NOTE: due to a bug in numba (conditional statements don't work in for loops), we cannot compile this core function to njit.
     attempted_xmins = np.ones(runs)
     attempted_xmaxs = np.ones(runs)
     attempted_alphas = np.ones(runs)
@@ -522,16 +520,21 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 15
     log_xmin = np.log(data[0])
     log_xmax = np.log(data[-1])
     log_range = log_xmax-log_xmin
+    trial_xmin = 0
+    trial_xmax = 0
+    trial_xmin_idx = 0
+    trial_xmax_idx = 0
     for i in range(runs):
-        #if (np.mod(i,1000) == 0):
-        #    print(i)
         trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
         trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
         trial_xmin_idx = find_nearest_idx(data,trial_xmin)
         trial_xmax_idx = find_nearest_idx(data,trial_xmax)
         trial_xmin = data[trial_xmin_idx]
         trial_xmax = data[trial_xmax_idx]
-        while (trial_xmax_idx - trial_xmin_idx < 10) + (trial_xmax < 2*trial_xmin):        
+        
+        #ensure there are at least 10 datapoints and that xmax > 2*xmin
+        #the comparison in the while loop is what ruins being able to njit this function. It cannot be replaced by anything that has a conditional in it.
+        while (trial_xmax_idx - trial_xmin_idx < 10) or (trial_xmax < 2*trial_xmin):
             trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
             trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
             trial_xmin_idx = find_nearest_idx(data,trial_xmin)
@@ -593,7 +596,9 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 15
     pq = possible_pqs2[minidx]
     p = possible_ps2[minidx]
     
-    return alpha, xmin, xmax, pq, p
+
+    
+    return alpha,xmin,xmax,pq,p
     
     
     
