@@ -656,8 +656,6 @@ def pl_like_fast(x,xmin,xmax,alpha):
     return ll, dist
 
 #exponential log likelihood. Matches with powerlaw library!
-#attempt jit acceleration.
-@numba.njit
 def exp_like(x,xmin,xmax,lam):
     if lam <=0:
         return -1e-12, np.zeros(len(x))
@@ -742,14 +740,15 @@ def tpl_like_fast(x,xmin,alpha,lam):
     return ll, dist
 
 #v2 use minimize_scalar to be about 3-4x faster than nelder-mead.
+#v3 prefer to use brent_findmin to be another 10x faster.
 def find_pl(x,xmin,xmax = 1e6):
-    x = np.array(x)
-    xc = x[(x > xmin)*(x < xmax)]
-    mymean = lambda a: -pl_like(xc,xmin,xmax,a)[0]
+    xc = x[(x >= xmin)*(x <= xmax)]
+    #mymean = lambda a: -pl_like(xc,xmin,xmax,a)[0]
     #myfit = optimize.minimize(mymean,2,method = 'Nelder-Mead', bounds = [(1,1e6)])
-    myfit = optimize.minimize_scalar(mymean, bounds = (1,30))
-    ll = -myfit.fun
-    alpha = myfit.x
+    #myfit = optimize.minimize_scalar(mymean, bounds = (1,30))
+    alpha = brent_findmin(xc)    
+    ll = pl_like_fast(xc,xmin,xmax,alpha)[0]
+    
     return alpha,ll
 
 ##MLE FITS
@@ -760,11 +759,13 @@ def find_pl(x,xmin,xmax = 1e6):
 def find_pl_fast(x,xmin,xmax = 1e6):
     if len(x) == 1:
         return np.nan, -1e12
-    mymean = lambda a: -pl_like_fast(x,xmin,xmax,a)[0]
+    
+    
+    #mymean = lambda a: -pl_like_fast(x,xmin,xmax,a)[0]
     #myfit = optimize.minimize(mymean,2,method = 'Nelder-Mead',bounds = [(1,1e6)])
-    myfit = optimize.minimize_scalar(mymean, bounds = (1,30))
-    ll = -myfit.fun
-    alpha = myfit.x
+    #myfit = optimize.minimize_scalar(mymean, bounds = (1,30))
+    alpha = brent_findmin(x)    
+    ll = pl_like_fast(x,x[0],x[-1],alpha)[0]
     return alpha,ll
 
 
@@ -878,6 +879,9 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
     if totest[0] == totest[1]:
         print('Please give different strings!')
     
+    #sort the data
+    x = np.sort(x)
+    
     #if the inputs are 'power_law' and 'truncated_power_law', then the inputs are nested versions of one another.
     if len(set(totest) - set(['power_law','truncated_power_law'])) == 0:
         nested = True
@@ -892,8 +896,8 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
     for i in range(len(totest)):
         if totest[i] == 'power_law':
             #print('pl')
-            findfuns[i] = find_pl
-            llrfuns[i] = pl_like
+            findfuns[i] = find_pl_fast
+            llrfuns[i] = pl_like_fast
         if totest[i] == 'truncated_power_law':
             #print('tpl')
             findfuns[i] = find_tpl
