@@ -241,7 +241,6 @@ def find_v2_sorted(data, alpha):
 #ASSUME X IS SORTED AND IT GOES FROM XMIN TO XMAX INCLUSIVE
 
 #Agrees with MLE solution to "Truncated Pareto" distribution from Table 1 of https://pearl.plymouth.ac.uk/bitstream/handle/10026.1/1571/2013Humphries337081phd.pdf?sequence=1
-#TODO: find if we can replace root finding with https://github.com/Nicholaswogan/NumbaMinpack?
 def find_pl_exact_sorted(x):
     ln = np.log
     xmin = x[0]
@@ -254,35 +253,36 @@ def find_pl_exact_sorted(x):
         return np.nan, -1e12
     
     #using function values only speeds up calculation
-    def wrap(alpha):
+    def f(alpha):
+        #added edge case for alpha near 1
         #test for alpha = 1
         if alpha == 1:
             return -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
-        
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
         if test_xmin > 100:
             return -1e12
-        beta = -xmax**(-alpha+1) + xmin**(-alpha+1)
-        gam = xmax**(-alpha+1)*ln(xmax) - xmin**(-alpha+1)*ln(xmin)
         
-        #dgamdalpha = xmin**(-alpha+1)*(ln(xmin)**2)- xmax**(-alpha+1)*(ln(xmax)**2)
-        f = n/(alpha - 1) - S - n*(gam/beta)
-        #first derivative can be useful for more accurate convergence at cost of calculation speed.
-        #df = -n/(alpha-1)**2 - n*(dgamdalpha/beta - (gam/beta)**2)
+        #if the tested alpha is very low, use a taylor approximation
+        if alpha < 1 + 1e-7:
+            y = alpha-1
+            beta = y*ln(xmax/xmin)
+            gam = ln(xmax/xmin) - y*ln(xmax)*ln(xmax) + y*ln(xmin)*ln(xmin)
+        else:
+            beta = -xmax**(-alpha+1) + xmin**(-alpha+1)
+            gam = xmax**(-alpha+1)*ln(xmax) - xmin**(-alpha+1)*ln(xmin)
+            
+        y = n/(alpha - 1) - S - n*(gam/beta)
         
-        return f#, df
-    
-    #if using first derivatives. Recommend not doing so for speed reasons.
-    #alpha = scipy.optimize.root_scalar(wrap, bracket = (1,100), fprime = True).root
+        return y
 
-#    try:
-    out = scipy.optimize.root_scalar(wrap, bracket = (1, 20))
-#    except ValueError:
-#        print('Value error!')
-#        print(x)
-#        return np.nan, -1e12
-    alpha = out.root
+    
+    #using SciPy optimize. Slower.
+    #out = scipy.optimize.root_scalar(f, bracket = (1, 20))
+    
+    #using numba jitted brent's method for finding the root. About 10x faster than scipy.
+    alpha = brent_findmin(x)
+    
     ll = pl_like(x,x[0],x[-1],alpha)[0]
     return alpha,ll
 
@@ -636,17 +636,18 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 10
 
 ##LIKELIHOOD FUNCTIONS
 
+#attempt jit acceleration.
+@numba.njit
 def pl_like(x,xmin,xmax,alpha):
     ll = 0
-    x = np.array(x)
     x = x[(x >= xmin)* (x <= xmax)]
     X = xmax/xmin
     dist = np.log(((alpha-1)/xmin)*(1/(1-X**(1-alpha)))*(x/xmin)**(-alpha))
-    ll = sum(dist)
+    ll = np.sum(dist)
     return ll, dist
 
-#fast version of pl_like
-#ENSURE INPUT X is geq xmin and leq xmax!
+#attempt jit acceleration. Ensure x geq xmin and x leq xmax is true before using.
+@numba.njit
 def pl_like_fast(x,xmin,xmax,alpha):
     ll = 0
     X = xmax/xmin
@@ -655,6 +656,8 @@ def pl_like_fast(x,xmin,xmax,alpha):
     return ll, dist
 
 #exponential log likelihood. Matches with powerlaw library!
+#attempt jit acceleration.
+@numba.njit
 def exp_like(x,xmin,xmax,lam):
     if lam <=0:
         return -1e-12, np.zeros(len(x))
@@ -689,6 +692,32 @@ def lognormal_like(x, xmin, xmax, mu, sigma):
     dist = -mylog(x)-((mylog(x)-mu)**2/(2*sigma**2)) + 0.5*mylog(2/(pi*sigma**2))- mylog(myerfc((mylog(xmin)-mu)/(mysqrt(2)*sigma)))
     ll = float(sum(dist))
     dist = myfloat(dist) #convert to float
+    return ll, dist
+
+#attempt a much faster version of lognormal_like to help with fitting.
+#can be jitt-ed if required for speed, though optimize_minimize will need to be rewritten for that and this would have diminishing returns.
+def lognormal_like_fast(x, xmin, xmax, mu, sigma):
+    import math
+    
+    ##  NOTE: the corresponding log-likelihood function used by the powerlaw() library
+    #   does not appropriately limit the boundaries for mu or sigma. Mu can, in
+    #   principle, be any value. Negative values of mu might be expected if the generative process is from
+    #   multiplication of many positive random variables, for instance. This is possible in our system and AGNs, so
+    #   we should not limit mu or sigma. While AGN and stars are very different systems, the MHD equations
+    #   should still apply in both cases, albeit in different limits.
+    
+    #catch the illegal values of mu and sigma
+    #if sigma <= 0 or mu < log(xmin):
+    #    return -1e12, np.zeros(len(x))
+    x = x[(x >= xmin)*(x <= xmax)]
+    #mpmath is used because it has higher accuracy than scipy
+    #dist = -mylog(x)-((mylog(x)-mu)**2/(2*sigma**2)) + 0.5*mylog(2/(pi*sigma**2))- mylog(myerfc((mylog(xmin)-mu)/(mysqrt(2)*sigma)))
+    
+    #use numpy and math module because accuracy is not as important as speed for our application.
+    dist = -np.log(x)-((np.log(x)-mu)**2/(2*sigma**2)) + 0.5*np.log(2/(np.pi*sigma**2))- np.log(math.erfc((np.log(xmin)-mu)/(np.sqrt(2)*sigma)))
+    
+    ll = np.sum(dist)
+    
     return ll, dist
 
 #get the truncated power law likelihood function. Restricts values to be alpha > 1 and lambda > 0. Matches with powerlaw() library!
@@ -790,6 +819,18 @@ def find_lognormal(x,xmin,xmax = 1e6):
     ll = -opt_results.fun
     return mu,sigma,ll
 
+#fast version of find_lognormal which relies on faster lognormal implementation that works OK for reasonable data.
+def find_lognormal_fast(x,xmin,xmax = 1e6):
+    x = np.array(x)
+    logx = np.log(x[(x >= xmin)*(x <= xmax)])
+    initial_guess = [np.mean(logx),np.std(logx)]
+    mymean = lambda par: -lognormal_like_fast(x,xmin,xmax,par[0],par[1])[0]
+    opt_results = optimize.minimize(mymean,initial_guess,method = 'Nelder-Mead')
+    mu = opt_results.x[0]
+    sigma = opt_results.x[1]
+    ll = -opt_results.fun
+    return mu,sigma,ll
+
 ##LOG LIKELIHOOD RATIO COMPARISON.
 #The truncated power law is nested within the power law, so set "nested" to true when comparing those two.
 def llr(dist1,dist2,nested = False):
@@ -863,8 +904,8 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
             llrfuns[i] = exp_like
         if totest[i] == 'lognormal':
             #print('ln')
-            findfuns[i] = find_lognormal
-            llrfuns[i] = lognormal_like
+            findfuns[i] = find_lognormal_fast
+            llrfuns[i] = lognormal_like_fast
         opts[i] = findfuns[i](x,xmin,xmax)[:-1]
         dists[i] = llrfuns[i](x,xmin,xmax,*opts[i])[-1]
 
@@ -1690,8 +1731,8 @@ def ad(s,d,smin,smax,dmin,dmax):
     alpha_tpl = find_tpl(dcm,dmin)
     
     #lognormal
-    sizelog = find_lognormal(sc,smin,smax)
-    durlog = find_lognormal(dc,dmin,dmax)
+    sizelog = find_lognormal_fast(sc,smin,smax)
+    durlog = find_lognormal_fast(dc,dmin,dmax)
     
     #exponential
     sizeexp = find_exp(sc,smin)
