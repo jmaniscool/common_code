@@ -87,7 +87,6 @@ def find_nearest_idx(array, value):
 #ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
 #Validated against https://doi.org/10.2478/s11600-013-0154-9 on 6-12-24, though the way they define the CDF goes from 1 to 0 and thus some algebra is required to get the same result as below.
 
-#try the jited version
 @numba.njit
 def find_d_sorted(data, alpha):
     if alpha <= 1:
@@ -369,8 +368,16 @@ def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-1
         test_xmin = np.log10(xmin)*(-alpha+1)
         if test_xmin > 100:
             return -1e12
-        beta = -xmax**(-alpha+1) + xmin**(-alpha+1)
-        gam = xmax**(-alpha+1)*ln(xmax) - xmin**(-alpha+1)*ln(xmin)
+        
+        #if the tested alpha is very low, use a taylor approximation
+        if alpha < 1 + 1e-7:
+            y = alpha-1
+            beta = y*ln(xmax/xmin)
+            gam = ln(xmax/xmin) - y*ln(xmax)*ln(xmax) + y*ln(xmin)*ln(xmin)
+        else:
+            beta = -xmax**(-alpha+1) + xmin**(-alpha+1)
+            gam = xmax**(-alpha+1)*ln(xmax) - xmin**(-alpha+1)*ln(xmin)
+            
         y = n/(alpha - 1) - S - n*(gam/beta)
         
         return y
@@ -459,6 +466,14 @@ def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-1
     #print('Max iters achieved.')
     return xcur
 
+#produces a power law between xmin and xmax when supplied with a vector of random variables with elements 0 < r < 1
+@numba.njit
+def pl_gen(datalen,xmin,xmax,alpha):
+    x = np.random.rand(datalen)
+    X = xmax/xmin
+    out = (1-x*(1-X**(1-alpha)))**(1/(1-alpha))*xmin
+    return out
+
 #find the true p value (as compared to pq). See Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9).
 #If true p > 0.15 (or maybe p > 0.2), then the power law fit is good.
 @numba.njit
@@ -467,8 +482,9 @@ def find_true_p(x,xmin,xmax,runs = 150, dfun = find_d_sorted):
     tot = 0
     p = 1
     sigp = 0
-    x = np.sort(x)
-    x = x[(x >= xmin)*(x <= xmax)]
+    xmin_idx = find_nearest_idx(x,xmin)
+    xmax_idx = find_nearest_idx(x,xmax)
+    x = x[xmin_idx:xmax_idx + 1]
     alpha = brent_findmin(x)
     de = dfun(x,alpha)
     for i in range(runs):
@@ -480,12 +496,25 @@ def find_true_p(x,xmin,xmax,runs = 150, dfun = find_d_sorted):
     p = tot/runs
     sigp = np.sqrt(p*(1-p)/runs) #1 sigma (68% CI)
     
-    
-    
     return p,sigp
+#core of the find_p part of the montecarlo code. Broken into its own jitted function to improve overhead in communicating between C and Python.
+#very minimal speed increase (<10%) compared to python implementation.
+@numba.njit
+def find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun):
+    possible_ps = np.zeros(len(possible_xmins))
+    for i in range(len(possible_ps)):
+        xmin = possible_xmins[i]
+        xmax = possible_xmaxs[i]
+        xmin_idx = find_nearest_idx(data,xmin)
+        xmax_idx = find_nearest_idx(data,xmax)
+        trimmed = data[xmin_idx:xmax_idx + 1]
+        possible_ps[i] = find_true_p(trimmed,xmin,xmax, runs = pruns, dfun = dfun)[0]
+    
+    return possible_ps
+        
     
 #use a monte carlo approach of finding xmin, xmax, and alpha using KS statistic.
-def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 150, dist_type = 'KS'):
+def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 100, dist_type = 'KS', calc_p = True):
     """
     Use a Monte Carlo approach to find xmin,xmax, and alpha using KS statistics.
     Calculate KS distance for [runs] samples of xmin/xmax from [data]. Return the run where xmax/xmin is largest and pq > pcrit.
@@ -501,6 +530,9 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 15
     data = np.sort(data) 
     dfun = find_d_sorted
     defaults = [1,0,0,0,0]
+    if calc_p == False:
+        pcrit = pqcrit
+        
     if dist_type == 'KS':
         dfun = find_d_sorted
     elif dist_type == 'AD':
@@ -565,17 +597,14 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 15
     possible_xmaxs = attempted_xmaxs[idxs]
     possible_alphas = attempted_alphas[idxs]
     possible_pqs = attempted_pqs[idxs]
-    print(len(possible_pqs))
+    #print(len(possible_pqs))
     
+        
     possible_ps = np.zeros(len(possible_pqs))
-    for i in range(len(possible_pqs)):
-        xmin = possible_xmins[i]
-        xmax = possible_xmaxs[i]
-        xmin_idx = find_nearest_idx(data,xmin)
-        xmax_idx = find_nearest_idx(data,xmax)
-        trimmed = data[xmin_idx:xmax_idx + 1]
-        tmp = find_true_p(trimmed,xmin,xmax, runs = pruns, dfun = dfun)[0]
-        possible_ps[i] = tmp
+    if calc_p == True:
+        possible_ps = find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun)
+    else:
+        possible_ps = possible_pqs
     
     #only examine runs where the p-value is greater than the pcrit (default 0.2)
     idxs2 = np.where(possible_ps > pcrit)[0]
@@ -584,7 +613,7 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 15
     possible_alphas2 = possible_alphas[idxs2]
     possible_pqs2 = possible_pqs[idxs2]
     possible_ps2 = possible_ps[idxs2]
-    print(len(possible_ps2))
+    #print(len(possible_ps2))
     
     minidx = np.argmax(possible_xmaxs2/possible_xmins2)
     
@@ -598,7 +627,7 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 15
     
 
     
-    return alpha,xmin,xmax,pq,p
+    return alpha,xmin,xmax,pq,p,len(possible_pqs),len(possible_ps2)
     
     
     
@@ -859,14 +888,6 @@ def lognormal_gen(x,xmin,xmax,mu,sigma):
     Q = Q*x - x + 1.0
     Q = myfloat(erfinv(Q))
     return exp(mu + sqrt(2)*sigma*Q)
-
-#produces a power law between xmin and xmax when supplied with a vector of random variables with elements 0 < r < 1
-@numba.njit
-def pl_gen(datalen,xmin,xmax,alpha):
-    x = np.random.rand(datalen)
-    X = xmax/xmin
-    out = (1-x*(1-X**(1-alpha)))**(1/(1-alpha))*xmin
-    return out
 
 #from powerlaw() library. Gives a truncated power law with given alpha and lambda.
 def tpl_gen(r,xmin,alpha,Lambda):
