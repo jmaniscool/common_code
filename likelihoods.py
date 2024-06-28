@@ -364,7 +364,10 @@ def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-1
         #added edge case for alpha near 1
         #test for alpha = 1
         if alpha == 1:
-            return -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
+            val = -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
+            if val < 0: #sometimes the value of this function will be less than zero (i.e. for lognormally distributed data). In that case, just return a positive value because it's an error.
+                return 100
+            return val
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
         if test_xmin > 100:
@@ -386,10 +389,10 @@ def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-1
     #hold previous, current, and blk (?) values
     xpre = blo #previous estimate of the root
     xcur = bhi #current estimate of the root
-    #xblk = 0 #holds value of x (?)
+    xblk = np.nan #holds value of x
     fpre = f(xpre)
     fcur = f(xcur)
-    #fblk = 0 #hold value of f(x) (?)
+    fblk = np.nan #hold value of f(x) (?)
 
     #s values
     spre = 0 #previous step size
@@ -669,6 +672,7 @@ def exp_like(x,xmin,xmax,lam):
     ll = N*np.log(lam) - N*lam*np.mean(x)
     return ll, dist
 
+#the much slower version that's more accurate using mpmath. Not recommended.
 def lognormal_like(x, xmin, xmax, mu, sigma):
     
     ##  NOTE: the corresponding log-likelihood function used by the powerlaw() library
