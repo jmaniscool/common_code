@@ -257,7 +257,10 @@ def find_pl_exact_sorted(x):
         #added edge case for alpha near 1
         #test for alpha = 1
         if alpha == 1:
-            return -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
+            val = -ln(ln(xmax/xmin)) - S/n #equation from Deluca & Corrall 2013, equation 12.
+            if val < 0: #in some cases (i.e. in when the data is pulled from an odd lognormal distribution), the sum will be negative. In those cases, return a random positive value.
+                return 100
+            return val
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
         if test_xmin > 100:
@@ -287,14 +290,18 @@ def find_pl_exact_sorted(x):
     return alpha,ll
 
 #wrapper for find_pl which does not assume x is sorted and is in the range of xmin and xmax.
+#replace with brent_findmin
 def find_pl_exact(x,xmin,xmax = 1e6):
     x = arr(x)
     tmp = x[(x >= xmin)*(x <= xmax)]
-    alpha,ll = find_pl_exact_sorted(np.sort(tmp))
+    alpha = brent_findmin(tmp)
+    #alpha,ll = find_pl_exact_sorted(np.sort(tmp))
+    ll = pl_like(x,xmin,xmax,alpha)[0]
     return alpha,ll
 
 #used to estimate the pq value from D in the monte carlo xmin/xmax
-def expfun(x,numterms = 5):
+@numba.njit
+def expfun(x,numterms = 20):
     val = 0
     for i in range(1,numterms+1):
         val = val + (-1)**(i-1)*np.exp(-2* i**2 * x**2)
@@ -751,7 +758,7 @@ def find_pl(x,xmin,xmax = 1e6):
     #myfit = optimize.minimize(mymean,2,method = 'Nelder-Mead', bounds = [(1,1e6)])
     #myfit = optimize.minimize_scalar(mymean, bounds = (1,30))
     alpha = brent_findmin(xc)    
-    ll = pl_like_fast(xc,xmin,xmax,alpha)[0]
+    ll = pl_like(xc,xmin,xmax,alpha)[0]
     
     return alpha,ll
 
@@ -900,8 +907,8 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
     for i in range(len(totest)):
         if totest[i] == 'power_law':
             #print('pl')
-            findfuns[i] = find_pl_fast
-            llrfuns[i] = pl_like_fast
+            findfuns[i] = find_pl
+            llrfuns[i] = pl_like
         if totest[i] == 'truncated_power_law':
             #print('tpl')
             findfuns[i] = find_tpl
