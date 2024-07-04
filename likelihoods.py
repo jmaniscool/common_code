@@ -66,13 +66,23 @@ import multiprocessing as multi
 import os
 import numba
 
-#vectorized operations
+#vectorized operations. Not really required, since we can get good precision with scipy.
 mylog = np.vectorize(mp.log)
 myexp = np.vectorize(mp.exp)
 mysqrt = np.vectorize(mp.sqrt)
 myerfc = np.vectorize(mp.erfc)
 myround = np.vectorize(round)
 myfloat = np.vectorize(float)
+
+ln = np.log
+pi = np.pi
+sqrt2 = np.sqrt(2)
+
+lognormlogpdf = scipy.stats.lognorm.logpdf
+lognormcdf = scipy.stats.lognorm.cdf
+
+normlogpdf = scipy.stats.norm.logpdf
+normcdf = scipy.stats.norm.cdf
 
 arr = np.array
 
@@ -679,56 +689,6 @@ def exp_like(x,xmin,xmax,lam):
     ll = N*np.log(lam) - N*lam*np.mean(x)
     return ll, dist
 
-#the much slower version that's more accurate using mpmath. Not recommended.
-def lognormal_like(x, xmin, xmax, mu, sigma):
-    
-    ##  NOTE: the corresponding log-likelihood function used by the powerlaw() library
-    #   does not appropriately limit the boundaries for mu or sigma. Mu can, in
-    #   principle, be any value. Negative values of mu might be expected if the generative process is from
-    #   multiplication of many positive random variables, for instance. This is possible in our system and AGNs, so
-    #   we should not limit mu or sigma. While AGN and stars are very different systems, the MHD equations
-    #   should still apply in both cases, albeit in different limits.
-    
-    #catch the illegal values of mu and sigma
-    #if sigma <= 0 or mu < log(xmin):
-    #    return -1e12, np.zeros(len(x))
-    x = np.array(x)
-    x = x[(x >= xmin)*(x <= xmax)]
-    n = len(x)
-    pi = mp.pi
-    #log likelihood is the sum of the log of the likelihoods for each point. Likelihood function is just pdf(x) for all x.
-    #mpmath is used because it has higher accuracy than scipy
-    dist = -mylog(x)-((mylog(x)-mu)**2/(2*sigma**2)) + 0.5*mylog(2/(pi*sigma**2))- mylog(myerfc((mylog(xmin)-mu)/(mysqrt(2)*sigma)))
-    ll = float(sum(dist))
-    dist = myfloat(dist) #convert to float
-    return ll, dist
-
-#attempt a much faster version of lognormal_like to help with fitting.
-#can be jitt-ed if required for speed, though optimize_minimize will need to be rewritten for that and this would have diminishing returns.
-def lognormal_like_fast(x, xmin, xmax, mu, sigma):
-    import math
-    
-    ##  NOTE: the corresponding log-likelihood function used by the powerlaw() library
-    #   does not appropriately limit the boundaries for mu or sigma. Mu can, in
-    #   principle, be any value. Negative values of mu might be expected if the generative process is from
-    #   multiplication of many positive random variables, for instance. This is possible in our system and AGNs, so
-    #   we should not limit mu or sigma. While AGN and stars are very different systems, the MHD equations
-    #   should still apply in both cases, albeit in different limits.
-    
-    #catch the illegal values of mu and sigma
-    #if sigma <= 0 or mu < log(xmin):
-    #    return -1e12, np.zeros(len(x))
-    x = x[(x >= xmin)*(x <= xmax)]
-    #mpmath is used because it has higher accuracy than scipy
-    #dist = -mylog(x)-((mylog(x)-mu)**2/(2*sigma**2)) + 0.5*mylog(2/(pi*sigma**2))- mylog(myerfc((mylog(xmin)-mu)/(mysqrt(2)*sigma)))
-    
-    #use numpy and math module because accuracy is not as important as speed for our application.
-    dist = -np.log(x)-((np.log(x)-mu)**2/(2*sigma**2)) + 0.5*np.log(2/(np.pi*sigma**2))- np.log(math.erfc((np.log(xmin)-mu)/(np.sqrt(2)*sigma)))
-    
-    ll = np.sum(dist)
-    
-    return ll, dist
-
 #get the truncated power law likelihood function. Restricts values to be alpha > 1 and lambda > 0. Matches with powerlaw() library!
 def tpl_like(x,xmin,xmax,alpha,lam):
     if alpha <= 1 or lam <= 0 or len(x) <= 5:
@@ -761,6 +721,14 @@ def find_pl(x,xmin,xmax = 1e6):
     ll = pl_like(xc,xmin,xmax,alpha)[0]
     
     return alpha,ll
+
+#the real likelihood function for the truncated lognormal distribution.
+def lognormal_like(data,mu,sigma,xmin = 0, xmax = np.inf):
+    data = data[(data >= xmin)*(data <= xmax)]
+    myscale = np.exp(mu)
+    dist = lognormlogpdf(data,s = sigma, scale = myscale) - ln( lognormcdf(xmax,s = sigma, scale = myscale) - lognormcdf(xmin,s = sigma, scale = myscale))
+    ll = np.sum(dist)
+    return ll,dist
 
 ##MLE FITS
 #find the exponents for a powerlaw between xmin and xmax, with errorbars
@@ -820,27 +788,45 @@ def find_exp(x,xmin,xmax = 1e6):
     ll = -opt_results.fun
     return lam,ll
 
-def find_lognormal(x,xmin,xmax = 1e6):
-    x = np.array(x)
-    logx = np.log(x[(x >= xmin)*(x <= xmax)])
-    initial_guess = [np.mean(logx),np.std(logx)]
-    mymean = lambda par: -lognormal_like(x,xmin,xmax,par[0],par[1])[0]
-    opt_results = optimize.minimize(mymean,initial_guess,method = 'Nelder-Mead')
-    mu = opt_results.x[0]
-    sigma = opt_results.x[1]
-    ll = -opt_results.fun
+#find the truncated normal distribution
+#likelihood function from simple probability distribution f(x) = phi(x)/(Phi(b)-Phi(a)) where phi(x) = pdf of N(0,1), and Phi(x) = cdf of N(0,1) at x
+def find_trunc_norm(x,xmin = -np.inf,xmax = np.inf):
+    x = x[(x >= xmin)*(x <= xmax)]
+    n = len(x)
+    #negative likelihood function for truncated normal.
+    def f(p):
+        mu = p[0]
+        sig = p[1]
+        tot = n*np.log(normcdf(xmax,mu,sig) - normcdf(xmin,mu,sig)) - np.sum(normlogpdf(x,mu,sig))
+        return tot
+    outs = optimize.minimize(f,[1,1], method = 'Nelder-Mead', bounds =[[-20,20],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
+    mu,sigma = outs.x
+    ll = -outs.val
     return mu,sigma,ll
 
-#fast version of find_lognormal which relies on faster lognormal implementation that works OK for reasonable data.
-def find_lognormal_fast(x,xmin,xmax = 1e6):
-    x = np.array(x)
-    logx = np.log(x[(x >= xmin)*(x <= xmax)])
-    initial_guess = [np.mean(logx),np.std(logx)]
-    mymean = lambda par: -lognormal_like_fast(x,xmin,xmax,par[0],par[1])[0]
-    opt_results = optimize.minimize(mymean,initial_guess,method = 'Nelder-Mead')
-    mu = opt_results.x[0]
-    sigma = opt_results.x[1]
-    ll = -opt_results.fun
+#fit the lognormal data by transforming it to normal, fitting using tnorm_mle, then reverse transforming. Gives same answer as fitting the lognormal log likelihood directly.
+def find_lognormal_from_normal(x,xmin = 0, xmax = np.inf):
+    #convert the lognormal to a normal distribution and then fit that to get the MLE estimated parameters.
+    anorm = np.log(xmin)
+    bnorm = np.log(xmax)
+    tnorm = np.log(x)
+    mu,sigma = find_trunc_norm(tnorm,anorm,bnorm)[:-1]
+    ll = lognormal_like(x,mu,sigma,xmin,xmax)
+    return mu,sigma,ll
+
+#find the MLE estimate of the mu and sigma of lognormal data.
+def find_lognormal(x,xmin = 0,xmax = np.inf):
+    x = x[(x >= xmin)*(x <= xmax)]
+    
+    inits = [np.mean(ln(x)),np.std(ln(x))] #MLE estimate for untruncated lognormal
+
+    #negative likelihood function for truncated normal.
+    fun = lambda p: -lognormal_like(x,p[0],p[1],xmin,xmax)[0]
+    
+    #minimize the negative likelihood
+    outs = optimize.minimize(fun,inits, method = 'Nelder-Mead', bounds =[[-20,20],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
+    mu,sigma = outs.x
+    ll = -outs.fun #return to positive
     return mu,sigma,ll
 
 ##LOG LIKELIHOOD RATIO COMPARISON.
@@ -919,8 +905,8 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
             llrfuns[i] = exp_like
         if totest[i] == 'lognormal':
             #print('ln')
-            findfuns[i] = find_lognormal_fast
-            llrfuns[i] = lognormal_like_fast
+            findfuns[i] = find_lognormal
+            llrfuns[i] = lognormal_like
         opts[i] = findfuns[i](x,xmin,xmax)[:-1]
         dists[i] = llrfuns[i](x,xmin,xmax,*opts[i])[-1]
 
@@ -929,22 +915,12 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
     ll,p = llr(dists[0],dists[1],nested = nested)
     return ll,p
 
+#much faster and accurate enough generator for lognormal data.
+def lognormal_gen(size,mu,sigma, a = 0, b = np.inf):
+    norm = scipy.stats.truncnorm.rvs((np.log(a)-mu)/sigma,(np.log(b)-mu)/sigma,loc = mu, scale = sigma, size = int(size))
+    lognorm = np.exp(norm) #Becaue "norm" is normally distributed between log(a) and log(b), exp(norm) will be lognormally distributed between a and b.
+    return lognorm
 
-
-#from powerlaw library. Edited to allow for an entire vector to be input at once.
-def lognormal_gen(x,xmin,xmax,mu,sigma):
-    from numpy import exp, sqrt, log, frompyfunc
-    from mpmath import erf, erfinv
-    #This is a long, complicated function broken into parts.
-    #We use mpmath to maintain numerical accuracy as we run through
-    #erf and erfinv, until we get to more sane numbers. Thanks to
-    #Wolfram Alpha for producing the appropriate inverse of the CCDF
-    #for me, which is what we need to calculate these things.
-    erfinv = frompyfunc(erfinv,1,1)
-    Q = erf( ( log(xmin) - mu ) / (sqrt(2)*sigma))
-    Q = Q*x - x + 1.0
-    Q = myfloat(erfinv(Q))
-    return exp(mu + sqrt(2)*sigma*Q)
 
 #from powerlaw() library. Gives a truncated power law with given alpha and lambda.
 def tpl_gen(r,xmin,alpha,Lambda):
@@ -1132,7 +1108,8 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
 def worker(index, ins, taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs):
     return index, bootstrap_core(*ins)
 
-#v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written.
+#v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written
+#TODO: remove parallelization option.
 def bootstrap2(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype = 'power_law_exact', dex = 0.25, ctr_max = 10, min_events = 10, parallel = False):
     
     #ctr_max is the max number of times to try reshuffling before skipping a particular run.
@@ -1421,6 +1398,241 @@ def bca(x,xmin,xmax, bootstrap_estimates, mytype = 'power_law', y = None, ymin =
 #vm = vector of max velocities. The expected scaling relationship is (tau-1)/(mu-1) = sp for vm vs size
 #The expected scaling relationship is (alpha-1)/(mu-1) = p/(nz) for vm vs duration
 
+
+
+#get the confidence intervals from the array of bootstrapped values.
+#95% confidence interval is default. That is, 95% of values are going to be in range
+#(lo,hi)
+def confidence_intervals(vals,ci = 0.95):
+    ci = 100 - ci
+    mu = np.nanmedian(vals)
+    lo = np.nanpercentile(vals,ci/2)
+    hi = np.nanpercentile(vals,100-ci/2)
+    return mu, lo, hi
+
+"""
+get the z-score from the values. Note that the variance of the vector of bootstrapped values
+is the standard error of the mean (SEM) of that estimator!!
+
+**That is, you do NOT need to divide by sqrt(N) when calculating the z-score**
+Dividing by sqrt(N) leads to the unphysical situation where taking more bootstrapping
+samples increases the certainty of your measurement. BOOTSTRAPPING ONLY HELPS YOU ESTIMATE
+THE STATISTICS OF YOUR ESTIMATOR!!
+
+p-value is certainty that mua =/= mub. p < 0.01 is significant at the 1% level, p < 0.05 is significant at the 5% level.
+
+A high p-value does not necessarily mean that the two histograms do not overlap with one another!
+
+IT IS PROBABLE THAT THIS FUNCTION IS OUTPERFORMED BY TOST!!
+"""
+def zscore(valsa,valsb):
+    mua,loa,hia = confidence_intervals(valsa,ci = 68) #get the 68% confidence interval
+    mub,lob,hib = confidence_intervals(valsb,ci = 68)
+    
+    
+    #assume greatest possible error when estimating a normal distribution from valsa and valsb, which are generally not normal
+    siga = max(hia-mua,mua-loa)
+    sigb = max(hib-mub,mub-lob)
+    
+    z = abs(mua-mub)/np.sqrt(siga**2 + sigb**2) #NO divide by N here!!
+    p = scipy.stats.norm.sf(z)*2
+    return z,p #The means are only significantly different if p <= 0.2 (i.e. if there is a 20% chance the differences in means arose by chance)
+
+"""
+Perform a two-sided one-tailed t-test of equivalence (TOST) on the difference of means between the histograms valsa and valsb.
+
+The two-sided one-tailed t-test has two null hypotheses: (mu1-mu2) < lo or (mu1-mu2) > hi for user-defined (lo,hi) = (-sig,sig)
+at a given p value threshold, defaults to p <= 0.05.
+
+If (mu1-mu2) < lo AND (mu1-mu2) > hi are rejected, then it must be that lo < (mu1 - m2) < hi at the confidence level supplied.
+
+***LEVEL 2 DETERMINATION OF EXPONENT RELATIONSHIP***
+We are not only interested in if lo < (mu1-mu2) < hi, but also if (mu1-mu2) is near enough to zero.
+If we show that lo < mu1 - mu2 < hi, and 0 is within the 68% CI of the mean value, then we can come to the conclusion that
+(mu1-mu2) is consistent with zero and the difference in means between these quantities is not statistically significant.
+***This is the most strict version of checking if our exponent relationship holds!***
+***LEVEL 2 END***
+
+***LEVEL 1 DETERMINATION OF EXPONENT RELATIONSHIP***
+We have a looser definition, in which we see if *just* the 68% CI of (mu1-mu2) has 0 in its bounds. This would mean that
+zero is consistent with (mu1-mu2) without necessarily determining that the difference significantly departs from zero.
+***LEVEL 1 END***
+
+***LEVEL 0 DETERMINATION OF EXPONENT RELATIONSHIP***
+If the 95% CI of mu1-mu2 does not include 0, then we are confident within a 5% type I error that the exponent relationship
+does not hold.
+***LEVEL 0 END***
+"""
+
+#I would not recommend using this right now -- it appears not to give us answers as significant when we indeed believe them to be!
+
+def tost(valsa,valsb,sig = 0.2):
+    conf = 0 #level of confidence of determination.
+    dist = valsa-valsb #construct the distribution of differences
+    med,lo,hi = confidence_intervals(dist,ci = 68) #get median value med, with 68% CI = (lo,hi)
+    lo = med - lo
+    hi = hi - med #convert CI to difference from median
+    zlo = (abs(med) + sig)/lo
+    zhi = (abs(med) - sig)/hi
+    """
+    #If one wants both p values for low and high
+    plo = scipy.stats.norm.sf(zlo)
+    phi = 1-scipy.stats.norm.sf(zhi)
+    """
+    
+    z = min(abs(zlo),abs(zhi))
+    
+    p = scipy.stats.norm.sf(z)
+
+    return z,p
+
+#Input is vectors of size and duration
+def ad(s,d,smin,smax,dmin,dmax):
+    
+    #scaling events
+    sc = s[(s >= smin)*(s <= smax)]
+    dc = d[(d >= dmin)*(d <= dmax)]
+    
+    #get events larger than smin to compare for truncated power law
+    scm = s[(s >= smin)]
+    dcm = d[(d >= dmin)]
+
+    #power law
+    tau_pl = find_pl_exact(sc,smin,smax)
+    alpha_pl = find_pl_exact(dc,dmin,dmax)
+    
+    #truncated power law (no xmax!)
+    tau_tpl = find_tpl(scm,smin)
+    alpha_tpl = find_tpl(dcm,dmin)
+    
+    #lognormal
+    sizelog = find_lognormal_fast(sc,smin,smax)
+    durlog = find_lognormal_fast(dc,dmin,dmax)
+    
+    #exponential
+    sizeexp = find_exp(sc,smin)
+    durexp = find_exp(dc,dmin)
+    
+    #simulated datasets
+    spl_sim = pl_gen(np.random.rand(1000),smin,smax,tau_pl[0])
+    dpl_sim = pl_gen(np.random.rand(1000),dmin,dmax,alpha_pl[0])
+    stpl_sim = tpl_gen(np.random.rand(1000),smin,tau_tpl[0],tau_tpl[1])
+    dtpl_sim = tpl_gen(np.random.rand(1000),dmin,alpha_pl[0],alpha_pl[1])
+    slog_sim = lognormal_gen(np.random.rand(1000),smin,smax,sizelog[0],sizelog[1])
+    dlog_sim = lognormal_gen(np.random.rand(1000),dmin,dmax,durlog[0],durlog[1])   
+    sizeexp_sim = exp_gen(np.random.rand(1000),smin,sizeexp[0])
+    durexp_sim = exp_gen(np.random.rand(1000),dmin,durexp[0])
+    
+    #Do AD tests
+    ad_spl = scipy.stats.anderson_ksamp([sc, spl_sim])
+    ad_dpl = scipy.stats.anderson_ksamp([dc, dpl_sim])
+    
+    ad_stpl = scipy.stats.anderson_ksamp([scm, stpl_sim])
+    ad_dtpl = scipy.stats.anderson_ksamp([dcm, dtpl_sim])
+    
+    ad_slog = scipy.stats.anderson_ksamp([sc,slog_sim])
+    ad_dlog = scipy.stats.anderson_ksamp([dc,dlog_sim])
+    
+    ad_sizeexp = scipy.stats.anderson_ksamp([sc, sizeexp_sim])
+    ad_durexp = scipy.stats.anderson_ksamp([dc, durexp_sim])
+    
+    
+    return ad_spl, ad_stpl, ad_slog, ad_sizeexp, ad_dpl, ad_dtpl, ad_dlog, ad_durexp
+
+
+##DEFUNCT FUNCTIONS
+
+"""
+
+#defunct lognormal functions from powerlaw() package that did not accurately include upper truncation.
+#the much slower version that's more accurate using mpmath. Not recommended.
+def lognormal_like(x, xmin, xmax, mu, sigma):
+    
+    ##  NOTE: the corresponding log-likelihood function used by the powerlaw() library
+    #   does not appropriately limit the boundaries for mu or sigma. Mu can, in
+    #   principle, be any value. Negative values of mu might be expected if the generative process is from
+    #   multiplication of many positive random variables, for instance. This is possible in our system and AGNs, so
+    #   we should not limit mu or sigma. While AGN and stars are very different systems, the MHD equations
+    #   should still apply in both cases, albeit in different limits.
+    
+    #catch the illegal values of mu and sigma
+    #if sigma <= 0 or mu < log(xmin):
+    #    return -1e12, np.zeros(len(x))
+    x = np.array(x)
+    x = x[(x >= xmin)*(x <= xmax)]
+    n = len(x)
+    pi = mp.pi
+    #log likelihood is the sum of the log of the likelihoods for each point. Likelihood function is just pdf(x) for all x.
+    #mpmath is used because it has higher accuracy than scipy
+    dist = -mylog(x)-((mylog(x)-mu)**2/(2*sigma**2)) + 0.5*mylog(2/(pi*sigma**2))- mylog(myerfc((mylog(xmin)-mu)/(mysqrt(2)*sigma)))
+    ll = float(sum(dist))
+    dist = myfloat(dist) #convert to float
+    return ll, dist
+
+#attempt a much faster version of lognormal_like to help with fitting.
+#can be jitt-ed if required for speed, though optimize_minimize will need to be rewritten for that and this would have diminishing returns.
+def lognormal_like_fast(x, xmin, xmax, mu, sigma):
+    import math
+    
+    ##  NOTE: the corresponding log-likelihood function used by the powerlaw() library
+    #   does not appropriately limit the boundaries for mu or sigma. Mu can, in
+    #   principle, be any value. Negative values of mu might be expected if the generative process is from
+    #   multiplication of many positive random variables, for instance. This is possible in our system and AGNs, so
+    #   we should not limit mu or sigma. While AGN and stars are very different systems, the MHD equations
+    #   should still apply in both cases, albeit in different limits.
+    
+    #catch the illegal values of mu and sigma
+    #if sigma <= 0 or mu < log(xmin):
+    #    return -1e12, np.zeros(len(x))
+    x = x[(x >= xmin)*(x <= xmax)]
+    #mpmath is used because it has higher accuracy than scipy
+    #dist = -mylog(x)-((mylog(x)-mu)**2/(2*sigma**2)) + 0.5*mylog(2/(pi*sigma**2))- mylog(myerfc((mylog(xmin)-mu)/(mysqrt(2)*sigma)))
+    
+    #use numpy and math module because accuracy is not as important as speed for our application.
+    dist = -np.log(x)-((np.log(x)-mu)**2/(2*sigma**2)) + 0.5*np.log(2/(np.pi*sigma**2))- np.log(math.erfc((np.log(xmin)-mu)/(np.sqrt(2)*sigma)))
+    
+    ll = np.sum(dist)
+    
+    return ll, dist
+
+def find_lognormal(x,xmin,xmax = 1e6):
+    x = np.array(x)
+    logx = np.log(x[(x >= xmin)*(x <= xmax)])
+    initial_guess = [np.mean(logx),np.std(logx)]
+    mymean = lambda par: -lognormal_like(x,xmin,xmax,par[0],par[1])[0]
+    opt_results = optimize.minimize(mymean,initial_guess,method = 'Nelder-Mead')
+    mu = opt_results.x[0]
+    sigma = opt_results.x[1]
+    ll = -opt_results.fun
+    return mu,sigma,ll
+
+#fast version of find_lognormal which relies on faster lognormal implementation that works OK for reasonable data.
+def find_lognormal_fast(x,xmin,xmax = 1e6):
+    x = np.array(x)
+    logx = np.log(x[(x >= xmin)*(x <= xmax)])
+    initial_guess = [np.mean(logx),np.std(logx)]
+    mymean = lambda par: -lognormal_like_fast(x,xmin,xmax,par[0],par[1])[0]
+    opt_results = optimize.minimize(mymean,initial_guess,method = 'Nelder-Mead')
+    mu = opt_results.x[0]
+    sigma = opt_results.x[1]
+    ll = -opt_results.fun
+    return mu,sigma,ll
+
+#from powerlaw library. Edited to allow for an entire vector to be input at once.
+def lognormal_gen(x,xmin,xmax,mu,sigma):
+    from numpy import exp, sqrt, log, frompyfunc
+    from mpmath import erf, erfinv
+    #This is a long, complicated function broken into parts.
+    #We use mpmath to maintain numerical accuracy as we run through
+    #erf and erfinv, until we get to more sane numbers. Thanks to
+    #Wolfram Alpha for producing the appropriate inverse of the CCDF
+    #for me, which is what we need to calculate these things.
+    erfinv = frompyfunc(erfinv,1,1)
+    Q = erf( ( log(xmin) - mu ) / (sqrt(2)*sigma))
+    Q = Q*x - x + 1.0
+    Q = myfloat(erfinv(Q))
+    return exp(mu + sqrt(2)*sigma*Q)
+
 #speed this up
 #@nb.njit #jit fails
 def bootstrap(s,d,vm,smin,smax,dmin,dmax,num_runs = 10000,is_fixed = False, mytype = 'power_law_exact',dex = 0.25, kic = ' ',min_events = 10,ctr_max = 10):
@@ -1625,164 +1837,6 @@ def bootstrap(s,d,vm,smin,smax,dmin,dmax,num_runs = 10000,is_fixed = False, myty
     return taus,alphas,mus, lhss,vlhss,vdlhss, snzs,sps,pnzs
 
 
-"""
-#Future! Make bootstrap run in parallel to make it faster.
-#wrapper function for bootstrap
-def boot_star(args):
-    return bootstrap(*args)
-
-from multiprocessing import Pool
-def boot_multi(s,d,vm,smin,smax,dmin,dmax,num_runs = 10000,is_fixed = False, mytype = 'power_law'):
-    #get number of threads
-    threads = os.cpu_count()
-    args = (s,d,vm,smin,smax,dmin,dmax,num_runs//threads,is_fixed, mytype) #create tuple to hold each branch of bootstrap
-    pool = Pool(threads) #initialize pool
-    out = pool.map(boot_star,args)
-    return out
-"""    
-
-#get the confidence intervals from the array of bootstrapped values.
-#95% confidence interval is default. That is, 95% of values are going to be in range
-#(lo,hi)
-def confidence_intervals(vals,ci = 0.95):
-    ci = 100 - ci
-    mu = np.nanmedian(vals)
-    lo = np.nanpercentile(vals,ci/2)
-    hi = np.nanpercentile(vals,100-ci/2)
-    return mu, lo, hi
-"""
-get the z-score from the values. Note that the variance of the vector of bootstrapped values
-is the standard error of the mean (SEM) of that estimator!!
-
-**That is, you do NOT need to divide by sqrt(N) when calculating the z-score**
-Dividing by sqrt(N) leads to the unphysical situation where taking more bootstrapping
-samples increases the certainty of your measurement. BOOTSTRAPPING ONLY HELPS YOU ESTIMATE
-THE STATISTICS OF YOUR ESTIMATOR!!
-
-p-value is certainty that mua =/= mub. p < 0.01 is significant at the 1% level, p < 0.05 is significant at the 5% level.
-
-A high p-value does not necessarily mean that the two histograms do not overlap with one another!
-
-IT IS PROBABLE THAT THIS FUNCTION IS OUTPERFORMED BY TOST!!
-"""
-def zscore(valsa,valsb):
-    mua,loa,hia = confidence_intervals(valsa,ci = 68) #get the 68% confidence interval
-    mub,lob,hib = confidence_intervals(valsb,ci = 68)
-    
-    
-    #assume greatest possible error when estimating a normal distribution from valsa and valsb, which are generally not normal
-    siga = max(hia-mua,mua-loa)
-    sigb = max(hib-mub,mub-lob)
-    
-    z = abs(mua-mub)/np.sqrt(siga**2 + sigb**2) #NO divide by N here!!
-    p = scipy.stats.norm.sf(z)*2
-    return z,p #The means are only significantly different if p <= 0.2 (i.e. if there is a 20% chance the differences in means arose by chance)
-
-"""
-Perform a two-sided one-tailed t-test of equivalence (TOST) on the difference of means between the histograms valsa and valsb.
-
-The two-sided one-tailed t-test has two null hypotheses: (mu1-mu2) < lo or (mu1-mu2) > hi for user-defined (lo,hi) = (-sig,sig)
-at a given p value threshold, defaults to p <= 0.05.
-
-If (mu1-mu2) < lo AND (mu1-mu2) > hi are rejected, then it must be that lo < (mu1 - m2) < hi at the confidence level supplied.
-
-***LEVEL 2 DETERMINATION OF EXPONENT RELATIONSHIP***
-We are not only interested in if lo < (mu1-mu2) < hi, but also if (mu1-mu2) is near enough to zero.
-If we show that lo < mu1 - mu2 < hi, and 0 is within the 68% CI of the mean value, then we can come to the conclusion that
-(mu1-mu2) is consistent with zero and the difference in means between these quantities is not statistically significant.
-***This is the most strict version of checking if our exponent relationship holds!***
-***LEVEL 2 END***
-
-***LEVEL 1 DETERMINATION OF EXPONENT RELATIONSHIP***
-We have a looser definition, in which we see if *just* the 68% CI of (mu1-mu2) has 0 in its bounds. This would mean that
-zero is consistent with (mu1-mu2) without necessarily determining that the difference significantly departs from zero.
-***LEVEL 1 END***
-
-***LEVEL 0 DETERMINATION OF EXPONENT RELATIONSHIP***
-If the 95% CI of mu1-mu2 does not include 0, then we are confident within a 5% type I error that the exponent relationship
-does not hold.
-***LEVEL 0 END***
-"""
-
-#I would not recommend using this right now -- it appears not to give us answers as significant when we indeed believe them to be!
-
-def tost(valsa,valsb,sig = 0.2):
-    conf = 0 #level of confidence of determination.
-    dist = valsa-valsb #construct the distribution of differences
-    med,lo,hi = confidence_intervals(dist,ci = 68) #get median value med, with 68% CI = (lo,hi)
-    lo = med - lo
-    hi = hi - med #convert CI to difference from median
-    zlo = (abs(med) + sig)/lo
-    zhi = (abs(med) - sig)/hi
-    """
-    #If one wants both p values for low and high
-    plo = scipy.stats.norm.sf(zlo)
-    phi = 1-scipy.stats.norm.sf(zhi)
-    """
-    
-    z = min(abs(zlo),abs(zhi))
-    
-    p = scipy.stats.norm.sf(z)
-
-    return z,p
-
-#Input is vectors of size and duration
-def ad(s,d,smin,smax,dmin,dmax):
-    
-    #scaling events
-    sc = s[(s >= smin)*(s <= smax)]
-    dc = d[(d >= dmin)*(d <= dmax)]
-    
-    #get events larger than smin to compare for truncated power law
-    scm = s[(s >= smin)]
-    dcm = d[(d >= dmin)]
-
-    #power law
-    tau_pl = find_pl_exact(sc,smin,smax)
-    alpha_pl = find_pl_exact(dc,dmin,dmax)
-    
-    #truncated power law (no xmax!)
-    tau_tpl = find_tpl(scm,smin)
-    alpha_tpl = find_tpl(dcm,dmin)
-    
-    #lognormal
-    sizelog = find_lognormal_fast(sc,smin,smax)
-    durlog = find_lognormal_fast(dc,dmin,dmax)
-    
-    #exponential
-    sizeexp = find_exp(sc,smin)
-    durexp = find_exp(dc,dmin)
-    
-    #simulated datasets
-    spl_sim = pl_gen(np.random.rand(1000),smin,smax,tau_pl[0])
-    dpl_sim = pl_gen(np.random.rand(1000),dmin,dmax,alpha_pl[0])
-    stpl_sim = tpl_gen(np.random.rand(1000),smin,tau_tpl[0],tau_tpl[1])
-    dtpl_sim = tpl_gen(np.random.rand(1000),dmin,alpha_pl[0],alpha_pl[1])
-    slog_sim = lognormal_gen(np.random.rand(1000),smin,smax,sizelog[0],sizelog[1])
-    dlog_sim = lognormal_gen(np.random.rand(1000),dmin,dmax,durlog[0],durlog[1])   
-    sizeexp_sim = exp_gen(np.random.rand(1000),smin,sizeexp[0])
-    durexp_sim = exp_gen(np.random.rand(1000),dmin,durexp[0])
-    
-    #Do AD tests
-    ad_spl = scipy.stats.anderson_ksamp([sc, spl_sim])
-    ad_dpl = scipy.stats.anderson_ksamp([dc, dpl_sim])
-    
-    ad_stpl = scipy.stats.anderson_ksamp([scm, stpl_sim])
-    ad_dtpl = scipy.stats.anderson_ksamp([dcm, dtpl_sim])
-    
-    ad_slog = scipy.stats.anderson_ksamp([sc,slog_sim])
-    ad_dlog = scipy.stats.anderson_ksamp([dc,dlog_sim])
-    
-    ad_sizeexp = scipy.stats.anderson_ksamp([sc, sizeexp_sim])
-    ad_durexp = scipy.stats.anderson_ksamp([dc, durexp_sim])
-    
-    
-    return ad_spl, ad_stpl, ad_slog, ad_sizeexp, ad_dpl, ad_dtpl, ad_dlog, ad_durexp
-
-
-##DEFUNCT FUNCTIONS
-
-"""
 #same as bootstrap above, but with assumption that duration bins inform the size and vmax bins.
 #Testing suggests the error is unphysical.
 def bootstrap_dur(s,d,vm,dmin,dmax,num_runs = 10000,is_fixed = False, mytype = 'power_law'):
