@@ -1,4 +1,4 @@
-#test
+
 from .get_slips import get_slips_wrap as gs
 from .fit import fit as fit
 from .shapes import shapes
@@ -25,17 +25,22 @@ from .decorator import convert_to_times #just in case you need to tune for a fig
 from .decorator import optimal_colors
 from .decorator import optimal_colors12
 
-from .likelihoods import find_pl_exact as find_pl_exact
-from .likelihoods import find_pl as find_pl
-from .likelihoods import find_tpl as find_tpl
+#likelihoods (contains likelihoods, generator functions, and relative testing of distributions.)
+from .likelihoods import find_pl
+from .likelihoods import find_tpl
 from .likelihoods import find_exp
 from .likelihoods import find_lognormal
 from .likelihoods import llr_wrap as llr
-from .likelihoods import bootstrap as bootstrap_old
-from .likelihoods import bca
-from .likelihoods import bootstrap2 as bootstrap
 from .likelihoods import ad
 from .likelihoods import pl_gen
 from .likelihoods import tpl_gen
-from .likelihoods import find_pl_montecarlo as find_pl_montecarlo
 from .likelihoods import generate_test_data_with_xmax as generate_test_data
+
+#bootstrap (contains just bootstrap functions and all helpers)
+from .bootstrap import bootstrap as bootstrap
+from .bootstrap import bca
+
+#montecarlo (contains find_pl_montecarlo)
+from .montecarlo import find_pl_montecarlo as find_pl_montecarlo
+
+#functions that aren't used any more are contained in defunct.py, but are kept for posterity.
