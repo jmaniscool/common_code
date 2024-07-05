@@ -311,12 +311,13 @@ def find_pl_exact(x,xmin,xmax = 1e6):
 
 #used to estimate the pq value from D in the monte carlo xmin/xmax
 @numba.njit
-def expfun(x,numterms = 20):
+def expfun(x,numterms = 10):
     val = 0
     for i in range(1,numterms+1):
         val = val + (-1)**(i-1)*np.exp(-2* i**2 * x**2)
         
     return 2*val
+
 
 #From Clauset et al 2009, they test their method for determining xmin using a random variable sampled from
 #a continuous, differentiable, piecewise pdf which follows exp(-alpha*x) for x < xmin and a power law for x > xmax. The inverse CDF shown here can be used to generate synthetic data.
@@ -596,14 +597,21 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 10
             trial_xmax = data[trial_xmax_idx]
         trimmed = data[trial_xmin_idx:trial_xmax_idx+1]
         alpha_hat = brent_findmin(trimmed)
-        tmpd = 1e12
+        tmpd = 1
         if alpha_hat > 1:
             attempted_ds[i] = dfun(trimmed,alpha_hat)
             tmpd = find_d_sorted(trimmed,alpha_hat)
         n = len(trimmed)
+        
+        
         #Function is Equation 29 in Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9)
-        #gives a "fake p" that correlates with the real p
-        attempted_pqs[i] = expfun(tmpd*np.sqrt(n) + 0.12*tmpd + 0.11*tmpd/np.sqrt(n))
+        #and is given on the wikipedia article on the KS test. According to Deluca & Corrall 2013, this only weakly correlates with the true p value.
+        #this is obtained by noting that expfun(z) is distributed according to the expfun distribution if one sets z = np.sqrt(z)*d + (correction factors).
+        #attempted_pqs[i] = expfun(tmpd*np.sqrt(n) + 0.12*tmpd + 0.11*tmpd/np.sqrt(n))
+        
+        #By first converting d --> d*np.sqrt(n), then we use the updated term from DOI: 10.4236/am.2020.113018 by Jan Vrbik 2020 (much more accurate)
+        tmpd = tmpd*np.sqrt(n) 
+        attempted_pqs[i] = expfun(tmpd + 0.17/np.sqrt(n) + (tmpd - 1)/(4*n))
         attempted_ns[i] = n
         attempted_alphas[i] = alpha_hat
         attempted_xmins[i] = trial_xmin
