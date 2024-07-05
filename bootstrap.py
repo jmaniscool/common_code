@@ -20,6 +20,7 @@ Testing results:
 
 import numpy as np
 import scipy
+import numba
 
 
 from .logbinning import logbinning
@@ -33,9 +34,38 @@ from .likelihoods import find_pl, find_tpl
 #caution by making error bars larger.
 
 
+#numba polyfit from https://gist.github.com/kadereub/9eae9cff356bb62cdbd672931e8e5ec4
+# Define Functions Using Numba
+# Idea here is to solve ax = b, using least squares, where a represents our coefficients e.g. x**2, x, constants
+@numba.njit
+def _coeff_mat(x, deg):
+    mat_ = np.zeros(shape=(x.shape[0],deg + 1))
+    const = np.ones_like(x)
+    mat_[:,0] = const
+    mat_[:, 1] = x
+    if deg > 1:
+        for n in range(2, deg + 1):
+            mat_[:, n] = x**n
+    return mat_
+    
+@numba.njit
+def _fit_x(a, b):
+    # linalg solves ax = b
+    det_ = np.linalg.lstsq(a, b)[0]
+    return det_
+ 
+@numba.njit
+def fit_poly(x, y, deg):
+    a = _coeff_mat(x, deg)
+    p = _fit_x(a, y)
+    # Reverse order so p[0] is coefficient of highest order
+    return p[::-1]
+
+
 
 #get a new random xmin_star and xmax_star which varies over -dex to dex in log scale and ensures xmin < xmax.
 #note that ensuring xmin > xmax makes the "random" value of xmax covariant with xmin.
+@numba.njit
 def logrand(xmin,xmax,dex):
     #if dex is zero, xmin and xmax do not change.
     if dex == 0:
@@ -51,19 +81,22 @@ def logrand(xmin,xmax,dex):
     xmax_star = 10**logxmax_star
     return xmin_star, xmax_star
 
+
 #find ymin and ymax from an interpolated function over logx,logy. Default to 50 log bins.
+@numba.njit
 def loginterp(x,y,xmin,xmax, bins = 50):
     bx,by,_ = logbinning(x,y,bins)
     
     logbx = np.log10(bx)
     logby = np.log10(by)
     
-    myinterp = scipy.interpolate.interp1d(logbx,logby)
+    #myinterp = scipy.interpolate.interp1d(logbx,logby)
+    #myinterp = np.interp(logbx)
     lo = max([np.log10(xmin),min(logbx)])
     hi = min([np.log10(xmax),max(logbx)])
     
-    logymin = myinterp(lo)
-    logymax = myinterp(hi)
+    logymin = np.interp(lo,logbx,logby)
+    logymax = np.interp(hi,logbx,logby)
     
     ymin = 10**logymin
     ymax = 10**logymax
@@ -84,7 +117,8 @@ def binned_interp(bx,myinterp,xmin,xmax):
     
 
 #bootstrapping core. From an input list of avalanche s,d,smin,smax,etc, estimate a single run of exponents.
-def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fun, dex, ctr_max,myinterp):
+@numba.njit
+def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fun, dex, ctr_max):
     
     length = len(s)
     nums = 0
@@ -110,8 +144,8 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     vmax_star = 1
     
     
-    #try to get enough events to bootstrap over (at least 1.)
-    while (ctr <= ctr_max)*((nums < 1) + (numd < 1) + (numv < 1)):    
+    #try to get enough events to bootstrap over (at least 10.)
+    while (ctr <= ctr_max)*((nums < 10) + (numd < 10) + (numv < 10)):    
         idxs = np.random.randint(0,length,length) #get indexes of avalanches to sample
         smin_star,smax_star = logrand(smin,smax,dex) #get random smin and smax, ensuring smax > smin    
         dmin_star,dmax_star = logrand(dmin,dmax,dex) #get random dmin and dmax, ensuring dmax > dmin
@@ -128,9 +162,9 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
             vmin_star,vmax_star = logrand(vmin,vmax,dex) #get random vmin and vmax, ensuring vmax > vmin        
             #vmin_star,vmax_star = binned_interp(sc,myinterp,smin_star,smax_star)
             
-        nums = sum((sc >= smin_star)*(sc <= smax_star))
-        numd = sum((dc >= dmin_star)*(dc <= dmax_star))
-        numv = sum((vmc >= vmin_star)*(vmc <= vmax_star))
+        nums = np.sum((sc >= smin_star)*(sc <= smax_star))
+        numd = np.sum((dc >= dmin_star)*(dc <= dmax_star))
+        numv = np.sum((vmc >= vmin_star)*(vmc <= vmax_star))
         ctr = ctr + 1
         
     #if the loop exited because ctr == ctr_max, return nans.
@@ -156,14 +190,19 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     alpha = fun(dcc, dmin_star,dmax_star)[0]
     
     #find snz and (tau-1)/(alpha-1)
-    snz = scipy.stats.linregress(logscc,logdcc).slope
-    sdlhs = (tau-1)/(alpha-1)
+    #snz = scipy.stats.linregress(logscc,logdcc).slope
+    snz = fit_poly(logscc,logdcc,1)[1]
+    sdlhs = np.nan
+    if alpha > 1:
+        sdlhs = (tau-1)/(alpha-1)
     
     #if vm is given, also calculate velocity statistics.
     if (vmin != 1)*(vmax != 1):
         mu = fun(vmcc,vmin_star,vmax_star)[0]
-        sp = scipy.stats.linregress(logscc,logvmcc).slope
-        pnz = scipy.stats.linregress(logdcc,logvmcc).slope
+        #sp = scipy.stats.linregress(logscc,logvmcc).slope
+        #pnz = scipy.stats.linregress(logdcc,logvmcc).slope
+        sp = fit_poly(logscc,logvmcc,1)[1]
+        pnz = fit_poly(logdcc,logvmcc,1)[1]
         svlhs = (tau-1)/(mu-1)
         dvlhs = (alpha-1)/(mu-1)
     
@@ -171,7 +210,7 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     return tau,alpha,mu, sdlhs,svlhs,dvlhs, snz,sp,pnz
 
 #v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written
-def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype = 'power_law_exact', dex = 0.25, ctr_max = 10, min_events = 10, parallel = False):
+def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype = 'power_law', dex = 0.25, ctr_max = 10, min_events = 10):
     
     #ctr_max is the max number of times to try reshuffling before skipping a particular run.
     taus = np.array([np.nan]*num_runs)
@@ -207,14 +246,14 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype =
     
     
     #if there are fewer than min_events number of events in s or d, return.
-    if sum((s >= smin)*(s <= smax)) <= min_events or sum((d >= dmin)*(d <= dmax)) <= min_events:
+    if np.sum((s >= smin)*(s <= smax)) <= min_events or np.sum((d >= dmin)*(d <= dmax)) <= min_events:
         print("Not enough events. Returning.")
         return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
     
     if mytype == 'power_law':
         fun = find_pl #set fun to be the power_law() function
     elif mytype == 'truncated_power_law':
-        fun = find_tpl #set fun to be the find_tpl() function instead. Not tested.
+        fun = find_pl #set fun to be the find_tpl() function instead. Not tested.
     else:
         print('Wrong option for function, please choose any of power_law or truncated_power_law. Returning.')
         return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
@@ -223,7 +262,7 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype =
     for i in range(num_runs):
         if i % 1000 == 0:
             print(i)
-        taus[i],alphas[i],mus[i],sdlhss[i],svlhss[i],dvlhss[i],snzs[i],sps[i],pnzs[i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max, myinterp)
+        taus[i],alphas[i],mus[i],sdlhss[i],svlhss[i],dvlhss[i],snzs[i],sps[i],pnzs[i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
         
     return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
 
@@ -275,13 +314,13 @@ def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95):
     
     #compute the "true" value of theta
     xc = x[(x >= xmin)*(x <= xmax)]
-    theta_hat = find_pl_exact(xc,xmin,xmax)[0]    
+    theta_hat = find_pl(xc,xmin,xmax)[0]    
     
     #Jackknife estimation of acceleration (from Scipy)
     numdat = len(xc)
     theta_jk = np.zeros(numdat)
     for i in range(numdat):
-        theta_jk[i] = find_pl_exact(np.delete(xc,i),xmin,xmax)[0]
+        theta_jk[i] = find_pl(np.delete(xc,i),xmin,xmax)[0]
 
     #calculate    
     return bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha)
@@ -293,8 +332,8 @@ def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95):
     xc = x[(x >= xmin)*(x <= xmax)]
     yc = y[(y >= ymin)*(y <= ymax)]
     
-    thetax_hat = find_pl_exact(xc,xmin,xmax)[0]
-    thetay_hat = find_pl_exact(yc,ymin,ymax)[0]
+    thetax_hat = find_pl(xc,xmin,xmax)[0]
+    thetay_hat = find_pl(yc,ymin,ymax)[0]
 
     #get the mean value of (tau-1)/(alpha-1)
     theta_hat = (thetax_hat - 1)/(thetay_hat - 1)
@@ -309,12 +348,12 @@ def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95):
     #jackknife over thetax
     thetax_jk = np.zeros(nx)
     for i in range(nx):
-        thetax_jk[i] = find_pl_exact(np.delete(xc,i),xmin,xmax)[0]
+        thetax_jk[i] = find_pl(np.delete(xc,i),xmin,xmax)[0]
     
     #jackknife over thetay
     thetay_jk = np.zeros(ny)
     for i in range(ny):
-        thetay_jk[i] = find_pl_exact(np.delete(yc,i),ymin,ymax)[0]   
+        thetay_jk[i] = find_pl(np.delete(yc,i),ymin,ymax)[0]   
     #get the total jackknife (??)
     theta_jk = np.zeros(nx*ny)
     for i in range(nx):
@@ -356,8 +395,8 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
     logyc = np.log10(y[(x >= xmin)*(x <= xmax)])
 
     fit_hat = scipy.stats.linregress(logxc,logyc).slope
-    thetax_hat = find_pl_exact(xc,xmin,xmax)[0]
-    thetay_hat = find_pl_exact(yc,ymin,ymax)[0]
+    thetax_hat = find_pl(xc,xmin,xmax)[0]
+    thetay_hat = find_pl(yc,ymin,ymax)[0]
     
     theta_hat = (thetax_hat - 1)/(thetay_hat - 1) - fit_hat #(tau-1)/(alpha-1) - snz
     
@@ -382,13 +421,13 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
         tmpx = np.delete(xc,i)
         tmplogx = np.delete(logxc,i)
         tmplogy = np.delete(logyc,i)
-        thetax_jk[i] = find_pl_exact(tmpx,xmin,xmax)[0]
+        thetax_jk[i] = find_pl(tmpx,xmin,xmax)[0]
         thetafit_jk[i] = scipy.stats.linregress(tmplogx,tmplogy).slope
     
     #jackknife over thetay
     thetay_jk = np.zeros(ny)
     for i in range(ny):
-        thetay_jk[i] = find_pl_exact(np.delete(yc,i),ymin,ymax)[0]
+        thetay_jk[i] = find_pl(np.delete(yc,i),ymin,ymax)[0]
                 
     theta_jk = np.zeros(nx*ny)
     #construct jackknife distribution
