@@ -126,6 +126,7 @@ def lognormal_gen(size,mu,sigma, a = 0, b = np.inf):
 
 
 #from powerlaw() library. Gives a truncated power law with given alpha and lambda.
+#Can probably be sped up significantly.
 def tpl_gen(r,xmin,alpha,Lambda):
     def helper(r):
         from numpy import log
@@ -159,6 +160,8 @@ def exp_gen(x,xmin,Lambda):
 def pl_like(x,xmin,xmax,alpha):
     ll = 0
     x = x[(x >= xmin)* (x <= xmax)]
+    if alpha == 1:
+        return -1e-12, np.zeros(len(x))
     X = xmax/xmin
     dist = np.log(((alpha-1)/xmin)*(1/(1-X**(1-alpha)))*(x/xmin)**(-alpha))
     ll = np.sum(dist)
@@ -203,12 +206,13 @@ def lognormal_like(data,mu,sigma,xmin = 0, xmax = np.inf):
 #find the exponents for a powerlaw between xmin and xmax, with errorbars
 #v2 use minimize_scalar to be about 3-4x faster than nelder-mead.
 #v3 prefer to use brent_findmin to be another 10x faster.
+@numba.njit
 def find_pl(x,xmin,xmax = 1e6):
     xc = x[(x >= xmin)*(x <= xmax)]
     #mymean = lambda a: -pl_like(xc,xmin,xmax,a)[0]
     #myfit = optimize.minimize(mymean,2,method = 'Nelder-Mead', bounds = [(1,1e6)])
     #myfit = optimize.minimize_scalar(mymean, bounds = (1,30))
-    alpha = brent_findmin(xc)    
+    alpha = brent_findmin(xc)
     ll = pl_like(xc,xmin,xmax,alpha)[0]
     
     return alpha,ll
