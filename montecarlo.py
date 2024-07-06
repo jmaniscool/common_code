@@ -9,7 +9,7 @@ from .distances import find_d_sorted, find_ad_sorted, find_nearest_idx
 from .brent import brent_findmin
 from .likelihoods import pl_gen
 
-#used to estimate the pq value from D in the monte carlo xmin/xmax
+#used to estimate the pq value from D in the monte carlo xmin/xmax. 10 terms is plenty to get extremely high accuracy.
 @numba.njit
 def expfun(x,numterms = 10):
     val = 0
@@ -58,7 +58,7 @@ def find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun):
         
     
 #use a monte carlo approach of finding xmin, xmax, and alpha using KS statistic.
-def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 100, dist_type = 'KS', calc_p = True):
+def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 100, dist_type = 'KS', calc_p = False):
     """
     Use a Monte Carlo approach to find xmin,xmax, and alpha using KS statistics.
     Calculate KS distance for [runs] samples of xmin/xmax from [data]. Return the run where xmax/xmin is largest and pq > pcrit.
@@ -177,5 +177,4 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 10
     p = possible_ps2[minidx]
     
 
-    
     return alpha,xmin,xmax,pq,p,len(possible_pqs),len(possible_ps2)
