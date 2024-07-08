@@ -191,7 +191,7 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     
     #find snz and (tau-1)/(alpha-1)
     #snz = scipy.stats.linregress(logscc,logdcc).slope
-    snz = fit_poly(logscc,logdcc,1)[1]
+    snz = fit_poly(logscc,logdcc,1)[0]
     sdlhs = np.nan
     if alpha > 1:
         sdlhs = (tau-1)/(alpha-1)
@@ -201,13 +201,21 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
         mu = fun(vmcc,vmin_star,vmax_star)[0]
         #sp = scipy.stats.linregress(logscc,logvmcc).slope
         #pnz = scipy.stats.linregress(logdcc,logvmcc).slope
-        sp = fit_poly(logscc,logvmcc,1)[1]
-        pnz = fit_poly(logdcc,logvmcc,1)[1]
+        sp = fit_poly(logscc,logvmcc,1)[0]
+        pnz = fit_poly(logdcc,logvmcc,1)[0]
         svlhs = (tau-1)/(mu-1)
         dvlhs = (alpha-1)/(mu-1)
     
     
     return tau,alpha,mu, sdlhs,svlhs,dvlhs, snz,sp,pnz
+
+@numba.njit(parallel = True)
+def bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max):
+    vals = np.zeros((9,num_runs))
+    for i in numba.prange(num_runs):
+        vals[:,i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
+    
+    return vals
 
 #v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written
 def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.25, ctr_max = 10, min_events = 10):
@@ -251,10 +259,20 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.
     fun = find_pl #set fun to be the power_law() function
     
     #do the bootstrapping (serial). A bit slower than the original bootstrapping approach.
-    for i in range(num_runs):
-        if i % 1000 == 0:
-            print(i)
-        taus[i],alphas[i],mus[i],sdlhss[i],svlhss[i],dvlhss[i],snzs[i],sps[i],pnzs[i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
+    #for i in range(num_runs):
+    #    if i % 1000 == 0:
+    #        print(i)
+    #    taus[i],alphas[i],mus[i],sdlhss[i],svlhss[i],dvlhss[i],snzs[i],sps[i],pnzs[i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
+    vals = bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
+    taus = vals[0,:]
+    alphas = vals[1,:]
+    mus = vals[2,:]
+    sdlhss = vals[3,:]
+    svlhss = vals[4,:]
+    dvlhss = vals[5,:]
+    snzs = vals[6,:]
+    sps = vals[6,:]
+    pnzs = vals[7,:]
         
     return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
 
