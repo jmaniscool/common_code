@@ -67,13 +67,14 @@ ln = np.log
 pi = np.pi
 sqrt2 = np.sqrt(2)
 
+arr = np.array
+
 lognormlogpdf = scipy.stats.lognorm.logpdf
 lognormcdf = scipy.stats.lognorm.cdf
 
 normlogpdf = scipy.stats.norm.logpdf
 normcdf = scipy.stats.norm.cdf
-
-arr = np.array
+normpdf = scipy.stats.norm.pdf
 
 
 ##GENERATOR FUNCTIONS
@@ -243,6 +244,26 @@ def find_exp(x,xmin,xmax = 1e6):
     ll = -opt_results.fun
     return lam,ll
 
+#method of moments estimator of mu, sigma for truncated normal distribution. Broken as of Jul 5, 2024.
+def momsolve_truncnorm(data,a,b):
+    n = len(data)
+    def f(p):
+        mu = p[0]
+        sig = p[1]
+        #PDFs
+        phib = normpdf((b-mu)/sig)
+        phia = normpdf((a-mu)/sig)
+
+        #CDFs
+        Phib = normcdf((b-mu)/sig)
+        Phia = normcdf((a-mu)/sig)
+        eq1 = mu - sig*((phib-phia)/(Phib - Phia)) - np.mean(data)
+        eq2 = mu*mu + sig*sig - sig*(((mu+b)*phib - (mu+a)*phia)/(Phib - Phia)) - np.mean(data*data)
+        return eq1,eq2
+    
+    muinit,siginit = scipy.optimize.fsolve(f,[1,1])
+    return muinit,siginit
+
 #find the truncated normal distribution
 #likelihood function from simple probability distribution f(x) = phi(x)/(Phi(b)-Phi(a)) where phi(x) = pdf of N(0,1), and Phi(x) = cdf of N(0,1) at x
 def find_trunc_norm(x,xmin = -np.inf,xmax = np.inf):
@@ -254,7 +275,8 @@ def find_trunc_norm(x,xmin = -np.inf,xmax = np.inf):
         sig = p[1]
         tot = n*np.log(normcdf(xmax,mu,sig) - normcdf(xmin,mu,sig)) - np.sum(normlogpdf(x,mu,sig))
         return tot
-    outs = scipy.optimize.minimize(f,[1,1], method = 'Nelder-Mead', bounds =[[-20,20],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
+    inits = momsolve_truncnorm(x,xmin,xmax)
+    outs = scipy.optimize.minimize(f,inits, method = 'Nelder-Mead') #will try to guess mu between -20 and 20, and sigma between 0 and 20.
     mu,sigma = outs.x
     ll = -outs.val
     return mu,sigma,ll
@@ -273,13 +295,17 @@ def find_lognormal_from_normal(x,xmin = 0, xmax = np.inf):
 def find_lognormal(x,xmin = 0,xmax = np.inf):
     x = x[(x >= xmin)*(x <= xmax)]
     
-    inits = [np.mean(ln(x)),np.std(ln(x))] #MLE estimate for untruncated lognormal
+    #inits = [np.mean(ln(x)),np.std(ln(x))] #MLE estimate for untruncated lognormal
+    xnorm = np.log(x)
+    anorm = np.log(xmin)
+    bnorm = np.log(xmax)
+    inits = momsolve_truncnorm(xnorm,anorm,bnorm) #use method of moments on truncated normal to estimate mu and sigma
 
     #negative likelihood function for truncated normal.
     fun = lambda p: -lognormal_like(x,p[0],p[1],xmin,xmax)[0]
     
-    #minimize the negative likelihood
-    outs = scipy.optimize.minimize(fun,inits, method = 'Nelder-Mead', bounds =[[-20,20],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
+    #minimize the negative likelihood. Testing suggests the value obtained from MLE is very close to the one obtained from method of moments, so bounds is not required.
+    outs = scipy.optimize.minimize(fun,inits, method = 'Nelder-Mead')#, bounds =[[-20,20],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
     mu,sigma = outs.x
     ll = -outs.fun #return to positive
     return mu,sigma,ll
