@@ -46,10 +46,10 @@ def find_true_p(x,xmin,xmax,runs = 150, dfun = find_d_sorted):
     return p,sigp
 #core of the find_p part of the montecarlo code. Broken into its own jitted function to improve overhead in communicating between C and Python.
 #very minimal speed increase (<10%) compared to python implementation.
-@numba.njit
+@numba.njit(parallel = True)
 def find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun):
     possible_ps = np.zeros(len(possible_xmins))
-    for i in range(len(possible_ps)):
+    for i in numba.prange(len(possible_ps)):
         xmin = possible_xmins[i]
         xmax = possible_xmaxs[i]
         xmin_idx = find_nearest_idx(data,xmin)
@@ -60,8 +60,8 @@ def find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun):
     return possible_ps
         
     
-#use a monte carlo approach of finding xmin, xmax, and alpha using KS statistic.
-def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.2, pruns = 100, dist_type = 'KS', calc_p = False):
+#use a monte carlo approach of finding xmin, xmax, and alpha using AD statistic. Parallelization and njit() has improved speed to ~600 ms per star with these options.
+def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 100, dist_type = 'AD', calc_p = True):
     """
     Use a Monte Carlo approach to find xmin,xmax, and alpha using KS statistics.
     Calculate KS distance for [runs] samples of xmin/xmax from [data]. Return the run where xmax/xmin is largest and pq > pcrit.
