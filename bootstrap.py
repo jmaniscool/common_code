@@ -210,7 +210,7 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     return tau,alpha,mu, sdlhs,svlhs,dvlhs, snz,sp,pnz
 
 #v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written
-def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype = 'power_law', dex = 0.25, ctr_max = 10, min_events = 10):
+def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.25, ctr_max = 10, min_events = 10):
     
     #ctr_max is the max number of times to try reshuffling before skipping a particular run.
     taus = np.array([np.nan]*num_runs)
@@ -234,12 +234,10 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype =
         vm = np.ones(num_avs)
         vmin = 1
         vmax = 1
-        myinterp = None
     else:
         vmin,vmax = loginterp(s,vm,smin,smax, bins = 50) #use for independent vm dex selection, which leads to unreasonably large error bars since vm should have such a small scaling regime most of the time.
         
         bs,bv,_ = logbinning(s,vm,50)
-        myinterp = scipy.interpolate.interp1d(np.log10(bs),np.log10(bv))
         
 
     logvm = np.log10(vm)
@@ -250,13 +248,7 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, mytype =
         print("Not enough events. Returning.")
         return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
     
-    if mytype == 'power_law':
-        fun = find_pl #set fun to be the power_law() function
-    elif mytype == 'truncated_power_law':
-        fun = find_pl #set fun to be the find_tpl() function instead. Not tested.
-    else:
-        print('Wrong option for function, please choose any of power_law or truncated_power_law. Returning.')
-        return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
+    fun = find_pl #set fun to be the power_law() function
     
     #do the bootstrapping (serial). A bit slower than the original bootstrapping approach.
     for i in range(num_runs):
