@@ -29,13 +29,16 @@ def find_true_p(x,xmin,xmax,runs = 150, dfun = find_d_sorted):
     xmin_idx = find_nearest_idx(x,xmin)
     xmax_idx = find_nearest_idx(x,xmax)
     x = x[xmin_idx:xmax_idx + 1]
+    n = len(x)
     alpha = brent_findmin(x)
     de = dfun(x,alpha)
     for i in range(runs):
-        synth = np.sort(pl_gen(len(x),xmin,xmax,alpha))
+        synth = np.sort(pl_gen(n,xmin,xmax,alpha))
         asynth = brent_findmin(synth)
         ds = dfun(synth,asynth)
-        tot = tot + (ds >= de) #if ds > de, increment tot
+        if ds >= de:
+            tot = tot + 1
+        #tot = tot + (ds >= de) #if ds > de, increment tot
         
     p = tot/runs
     sigp = np.sqrt(p*(1-p)/runs) #1 sigma (68% CI)
