@@ -305,7 +305,7 @@ def find_lognormal(x,xmin = 0,xmax = np.inf):
     fun = lambda p: -lognormal_like(x,p[0],p[1],xmin,xmax)[0]
     
     #minimize the negative likelihood. Testing suggests the value obtained from MLE is very close to the one obtained from method of moments, so bounds is not required.
-    outs = scipy.optimize.minimize(fun,inits, method = 'Nelder-Mead')#, bounds =[[-20,20],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
+    outs = scipy.optimize.minimize(fun,inits, method = 'Nelder-Mead', bounds =[[-20,20],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
     mu,sigma = outs.x
     ll = -outs.fun #return to positive
     return mu,sigma,ll
@@ -371,6 +371,7 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
     llrfuns = [None]*2
     opts = [None]*2
     dists = [None]*2
+    x = x[(x >= xmin)*(x <= xmax)]
     for i in range(len(totest)):
         if totest[i] == 'power_law':
             #print('pl')
