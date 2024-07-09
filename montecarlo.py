@@ -147,11 +147,23 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     
     #find the possible indices. For each possible index, calculate the true p value using simulation.
     idxs = np.where(attempted_pqs > pqcrit)[0]
+    
+    #edge case: if none of the fits are good enough, return the xmin,xmax where pq is the highest
+    if len(idxs) == 0:
+        minidx = np.argmax(attempted_pqs)
+        xmin = attempted_xmins[minidx]
+        xmax = attempted_xmaxs[minidx]
+        alpha = attempted_alphas[minidx]
+        pq = attempted_pqs[minidx]
+        p = attempted_pqs[minidx]
+        return alpha,xmin,xmax,pq,p,-2,-2
+        
     possible_xmins = attempted_xmins[idxs]
     possible_xmaxs = attempted_xmaxs[idxs]
     possible_alphas = attempted_alphas[idxs]
     possible_pqs = attempted_pqs[idxs]
     #print(len(possible_pqs))
+    
     
         
     possible_ps = np.zeros(len(possible_pqs))
@@ -162,6 +174,17 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     
     #only examine runs where the p-value is greater than the pcrit (default 0.2)
     idxs2 = np.where(possible_ps > pcrit)[0]
+
+    #edge case: if none of the fits are good enough, return the xmin,xmax where pq is the highest
+    if len(idxs2) == 0:
+        minidx = np.argmax(possible_ps)
+        xmin = possible_xmins[minidx]
+        xmax = possible_xmaxs[minidx]
+        alpha = possible_alphas[minidx]
+        pq = possible_pqs[minidx]
+        p = possible_ps[minidx]
+        return alpha,xmin,xmax,pq,p,-1,-1
+    
     possible_xmins2 = possible_xmins[idxs2]
     possible_xmaxs2 = possible_xmaxs[idxs2]
     possible_alphas2 = possible_alphas[idxs2]
