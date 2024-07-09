@@ -193,7 +193,7 @@ def tpl_like(x,xmin,xmax,alpha,lam):
     return ll, dist
 
 #the real likelihood function for the truncated lognormal distribution when known to be truncated between xmin and xmax.
-def lognormal_like_truncated(data,mu,sigma,xmin = 0, xmax = np.inf):
+def lognormal_like_truncated(data,xmin,xmax,mu,sigma):
     data = data[(data >= xmin)*(data <= xmax)]
     myscale = np.exp(mu)
     dist = lognormlogpdf(data,s = sigma, scale = myscale) - ln( lognormcdf(xmax,s = sigma, scale = myscale) - lognormcdf(xmin,s = sigma, scale = myscale))
@@ -201,7 +201,7 @@ def lognormal_like_truncated(data,mu,sigma,xmin = 0, xmax = np.inf):
     return ll,dist
 
 #the likelihood function used in Clauset et al 2009, useful for lognormal data truncated from the left and only fitting for xmin < x < xmax and the underlying distribution is not truncated.
-def lognormal_like(data,mu,sigma,xmin = 0, xmax = np.inf):
+def lognormal_like(data,xmin,xmax,mu,sigma):
     data = data[(data >= xmin)*(data <= xmax)]
     myscale = np.exp(mu)
     dist = lognormlogpdf(data,s = sigma, scale = myscale) - ln(1 - lognormcdf(xmin,s = sigma, scale = myscale))
@@ -311,7 +311,7 @@ def find_lognormal_truncated(x,xmin = 0,xmax = np.inf):
     inits = [1,1]
 
     #negative likelihood function for truncated normal.
-    fun = lambda p: -lognormal_like_truncated(x,p[0],p[1],xmin,xmax)[0]
+    fun = lambda p: -lognormal_like_truncated(x,xmin,xmax,p[0],p[1])[0]
     
     #minimize the negative likelihood. Testing suggests the value obtained from MLE is very close to the one obtained from method of moments, so bounds is not required.
     outs = scipy.optimize.minimize(fun,inits, method = 'Nelder-Mead', bounds =[[-100,100],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
@@ -331,10 +331,10 @@ def find_lognormal(x,xmin = 0,xmax = np.inf):
     inits = [np.mean(np.log(x)),np.std(np.log(x))]
 
     #negative likelihood function for truncated normal.
-    fun = lambda p: -lognormal_like(x,p[0],p[1],xmin,xmax)[0]
+    fun = lambda p: -lognormal_like(x,xmin,xmax,p[0],p[1])[0]
     
     #minimize the negative likelihood. Testing suggests the value obtained from MLE is very close to the one obtained from method of moments, so bounds is not required.
-    outs = scipy.optimize.minimize(fun,inits, method = 'Nelder-Mead', bounds =[[-100,100],[0,20]]) #will try to guess mu between -20 and 20, and sigma between 0 and 20.
+    outs = scipy.optimize.minimize(fun,inits, method = 'Nelder-Mead') #will try to guess mu between -20 and 20, and sigma between 0 and 20.
     mu,sigma = outs.x
     ll = -outs.fun #return to positive
     return mu,sigma,ll
