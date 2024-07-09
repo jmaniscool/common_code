@@ -211,11 +211,12 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
 
 @numba.njit(parallel = True)
 def bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max):
-    vals = np.zeros((9,num_runs))
+    vals = np.zeros((num_runs,9))
     for i in numba.prange(num_runs):
-        vals[:,i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
+        tmp = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
+        vals[i] = tmp
     
-    return vals
+    return vals.transpose()
 
 #v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written
 def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.25, ctr_max = 10, min_events = 10):
@@ -279,6 +280,8 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.
 #the core of the BCa correction given theta_hat and jackknifed samples theta_jk. Validated against scipy.stats.bootstrap.
 def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
     
+    from matplotlib import pyplot as plt
+    
     z0 = scipy.stats.norm.ppf((np.sum(bootstrap_estimates < theta_hat) + 0.5) / (len(bootstrap_estimates) + 1))
 
     theta_jk_dot = np.nanmean(theta_jk)
@@ -325,7 +328,7 @@ def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95):
     
     #compute the "true" value of theta
     xc = x[(x >= xmin)*(x <= xmax)]
-    theta_hat = find_pl(xc,xmin,xmax)[0]    
+    theta_hat = find_pl(xc,xmin,xmax)[0]
     
     #Jackknife estimation of acceleration (from Scipy)
     numdat = len(xc)
@@ -333,7 +336,11 @@ def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95):
     for i in range(numdat):
         theta_jk[i] = find_pl(np.delete(xc,i),xmin,xmax)[0]
 
-    #calculate    
+    #calculate
+    
+    if (theta_hat == 1) or (np.sum(theta_jk) == numdat):
+        return theta_hat, np.nan, np.nan
+    
     return bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha)
 
 #compute the BCA confidence intervals for combined statistics. i.e. like (tau-1)/(alpha-1)
@@ -372,6 +379,9 @@ def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95):
             theta_jk[int(j*nx + i)] = (thetax_jk[i] - 1)/(thetay_jk[j] - 1) #compute (tau-1)/(alpha-1) for all jackknifed nx and ny, taking advantage of independence of x and y
         
 
+    if (theta_hat == 1) or (np.sum(theta_jk) == nx*ny):
+        return theta_hat, np.nan, np.nan
+
     return bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha)
 
 #Do BCa on fitted functions (i.e. like snz)
@@ -391,6 +401,10 @@ def bca_fit(x,y,xmin,xmax,bootstrap_estimates,ci = 0.95):
     theta_jk = np.zeros(nx)
     for i in range(nx):
         theta_jk[i] = scipy.stats.linregress(np.delete(logxc,i),np.delete(logyc,i)).slope
+
+
+    if (theta_hat == 1) or (np.sum(theta_jk) == nx):
+        return theta_hat, np.nan, np.nan
         
     return bca_core(theta_hat,theta_jk,bootstrap_estimates,alpha)
 
@@ -410,6 +424,8 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
     fit_hat = scipy.stats.linregress(logxc,logyc).slope
     thetax_hat = find_pl(xc,xmin,xmax)[0]
     thetay_hat = find_pl(yc,ymin,ymax)[0]
+    if thetay_hat == 1:
+        thetay_hat = np.nan
     
     theta_hat = (thetax_hat - 1)/(thetay_hat - 1) - fit_hat #(tau-1)/(alpha-1) - snz
     
@@ -451,7 +467,10 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
             theta_jk[int(j*nx + i)] = (thetax_jk[i] - 1)/(thetay_jk[j] - 1) - thetafit_jk[i]
     
     #bootstrap_estimates must be lhss and bootstrap_estimates2 must be snz
-    bootstrap_estimates = bootstrap_estimates - bootstrap_estimates2    
+    bootstrap_estimates = bootstrap_estimates - bootstrap_estimates2
+    
+    if (np.isnan(thetay_hat)) or (np.sum(theta_jk) == nx*ny):
+        return theta_hat, np.nan, np.nan
     
     return bca_core(theta_hat,theta_jk,bootstrap_estimates,alpha)
 
