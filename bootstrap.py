@@ -281,7 +281,7 @@ def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
     
     z0 = scipy.stats.norm.ppf((np.sum(bootstrap_estimates < theta_hat) + 0.5) / (len(bootstrap_estimates) + 1))
 
-    theta_jk_dot = np.mean(theta_jk)
+    theta_jk_dot = np.nanmean(theta_jk)
     
     #SciPy implementation of BCa.
     #NOTE: the numdat term drops out algebraically, so I am unsure why it's there in the SciPy implementation (shown below)
@@ -294,10 +294,9 @@ def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
     #validated against test data given in the book. For test data a = [48, 36, 20, 29, 42, 42, 20, 42, 22, 41, 45, 14,6, 0, 33, 28, 34, 4, 32, 24, 47, 41, 24, 26, 30,41]
     #given on pp. 180, a_hat should equal 0.61 (given in pp. 186). Formula below gives correct answer.
     #Also checked bca_core against SciPy.
-    top = np.sum((theta_jk_dot - theta_jk)**3)
-    bot = np.sum((theta_jk_dot - theta_jk)**2)
+    top = np.nansum((theta_jk_dot - theta_jk)**3)
+    bot = np.nansum((theta_jk_dot - theta_jk)**2)
     a_hat = top/(6*bot**(3/2))
-
     
     #confidence interval assuming normality
     z_alpha = scipy.stats.norm.ppf(alpha / 2)
@@ -306,12 +305,14 @@ def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
     # Correct z-score with BCa adjustment
     z_bca1 = z0 + (z0 + z_alpha) / (1 - a_hat * (z0 + z_alpha))
     z_bca2 = z0 + (z0 + z1_alpha) / (1 - a_hat * (z0 + z1_alpha))
+    
 
     #Obtain the lower and upper alpha values
     alpha_1 = scipy.special.ndtr(z_bca1)
     alpha_2 = scipy.special.ndtr(z_bca2)
     
     #obtain the confidence interval from the bootstrap estimates. Ignore nans.
+    #print(alpha_1)
     ci_lower = np.nanpercentile(bootstrap_estimates,alpha_1*100)
     ci_upper = np.nanpercentile(bootstrap_estimates,alpha_2*100)
     return theta_hat, ci_lower, ci_upper
@@ -396,6 +397,8 @@ def bca_fit(x,y,xmin,xmax,bootstrap_estimates,ci = 0.95):
 #BCa to determine the exponent relationship confidence intervals, i.e. (tau-1)/(alpha-1) = snz
 #HOW TO USE: pass in bca_rel(s,d,smin,smax,dmin,dmax,lhss,snzs, ci = 0.95) to get bootstrapping.
 def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci = 0.95):
+    
+    from matplotlib import pyplot as plt
     alpha = 1 - ci
     
     xc = x[(x>= xmin)*(x <= xmax)]
@@ -438,6 +441,8 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
     thetay_jk = np.zeros(ny)
     for i in range(ny):
         thetay_jk[i] = find_pl(np.delete(yc,i),ymin,ymax)[0]
+        if thetay_jk[i] == 1:
+            thetay_jk[i] = np.nan
                 
     theta_jk = np.zeros(nx*ny)
     #construct jackknife distribution
@@ -445,8 +450,8 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
         for j in range(ny):
             theta_jk[int(j*nx + i)] = (thetax_jk[i] - 1)/(thetay_jk[j] - 1) - thetafit_jk[i]
     
-    #bootstrap_estimates must be lhss and bootstrap_estimates2 must be snz    
-    bootstrap_estimates = bootstrap_estimates - bootstrap_estimates2
+    #bootstrap_estimates must be lhss and bootstrap_estimates2 must be snz
+    bootstrap_estimates = bootstrap_estimates - bootstrap_estimates2    
     
     return bca_core(theta_hat,theta_jk,bootstrap_estimates,alpha)
 
