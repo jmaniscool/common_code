@@ -147,7 +147,8 @@ def tpl_gen(r,xmin,alpha,Lambda):
     return array(list(map(helper, r)))
 
 #produces an exponentially distributed PDF with a given xmin.
-def exp_gen(x,xmin,Lambda):
+def exp_gen(size,xmin,Lambda):
+    x = np.random.rand(size)
     out = -np.log(1-x)/Lambda
     out = out + xmin
     return out
@@ -190,6 +191,12 @@ def tpl_like(x,xmin,xmax,alpha,lam):
     dist = (1-alpha)*np.log(lam) - alpha*np.log(x) - lam*x - mylog(gammainc(1-alpha,lam*xmin))
     ll = float(sum(dist))
     dist = myfloat(dist)
+    
+    #val = lam*xmin
+    
+    #dist = (1-alpha)*np.log(lam) - alpha*np.log(x) - lam*x - np.log(scipy.special.expn(alpha,val)*(val**(1-alpha)))
+    #dist = (1-alpha)*np.log(lam) - alpha*np.log(x) - lam*x - np.log(scipy.special.expn(alpha,val)) - (1-alpha)*np.log(val)
+    #ll = np.sum(dist)
     return ll, dist
 
 #the real likelihood function for the truncated lognormal distribution when known to be truncated between xmin and xmax.
@@ -454,14 +461,14 @@ def ad(s,d,smin,smax,dmin,dmax):
     durexp = find_exp(dc,dmin)
     
     #simulated datasets
-    spl_sim = pl_gen(np.random.rand(1000),smin,smax,tau_pl[0])
-    dpl_sim = pl_gen(np.random.rand(1000),dmin,dmax,alpha_pl[0])
-    stpl_sim = tpl_gen(np.random.rand(1000),smin,tau_tpl[0],tau_tpl[1])
-    dtpl_sim = tpl_gen(np.random.rand(1000),dmin,alpha_tpl[0],alpha_tpl[1])
-    slog_sim = lognormal_gen(np.random.rand(1000),smin,smax,sizelog[0],sizelog[1])
-    dlog_sim = lognormal_gen(np.random.rand(1000),dmin,dmax,durlog[0],durlog[1])   
-    sizeexp_sim = exp_gen(np.random.rand(1000),smin,sizeexp[0])
-    durexp_sim = exp_gen(np.random.rand(1000),dmin,durexp[0])
+    spl_sim = pl_gen(1000,smin,smax,tau_pl[0])
+    dpl_sim = pl_gen(1000,dmin,dmax,alpha_pl[0])
+    stpl_sim = tpl_gen(1000,smin,tau_tpl[0],tau_tpl[1])
+    dtpl_sim = tpl_gen(1000,dmin,alpha_tpl[0],alpha_tpl[1])
+    slog_sim = lognormal_gen(1000,smin,smax,sizelog[0],sizelog[1])
+    dlog_sim = lognormal_gen(1000,dmin,dmax,durlog[0],durlog[1])   
+    sizeexp_sim = exp_gen(1000,smin,sizeexp[0])
+    durexp_sim = exp_gen(1000,dmin,durexp[0])
     
     #Do AD tests
     ad_spl = scipy.stats.anderson_ksamp([sc, spl_sim])
