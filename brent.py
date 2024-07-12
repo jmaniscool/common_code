@@ -19,6 +19,8 @@ def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-1
     xmin = x[0]
     xmax = x[-1]
     n = len(x)
+    if np.sum(x) == x[0]*n:
+        return np.nan
     S = np.sum(np.log(x))
     def f(alpha):
         #added edge case for alpha near 1
