@@ -33,7 +33,7 @@ def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-1
         #large values of test_xmin lead to undefined behavior due to float imprecision, limit approaches -inf. with derivative +inf
         test_xmin = np.log10(xmin)*(-alpha+1)
         if test_xmin > 100:
-            return -1e12
+            return -10
         
         #if the tested alpha is very low, use a taylor approximation
         if alpha < 1 + 1e-7:
