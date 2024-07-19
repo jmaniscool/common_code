@@ -153,7 +153,7 @@ def get_slips_wrap(displacement = None, velocity = None, time = None, drops = Tr
     #st and en indices are the start and end in velocity-land
     #the time vector is shifted forward by 1 index so the displacement and time are same length
     if displacement is None:
-        displacement = scipy.integrate.cumtrapz(velocity,time)
+        displacement = scipy.integrate.cumulative_trapezoid(velocity,time)
         displacement = np.append([displacement[0], displacement[0]], displacement)
         dt = np.median(np.diff(time))
         time = np.append(time[0],time + dt) #make time and displacement the same length
