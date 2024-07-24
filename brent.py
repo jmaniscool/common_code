@@ -13,7 +13,7 @@ import numpy as np
 #Gives same results as Scipy version which uses a c backend as implemented at https://github.com/scipy/scipy/blob/v1.13.1/scipy/optimize/Zeros/brentq.c
 #Fortran version that's slightly different is implemented in https://websites.pmc.ucsc.edu/~fnimmo/eart290c_17/NumericalRecipesinF77.pdf.
 @numba.njit
-def brent_findmin(x,blo = 1, bhi = 20, xtol = 1e-12, rtol = 8.881784197001252e-16, maxiter = 100):
+def brent_findmin(x,blo = 1.0, bhi = 20.0, xtol = 1e-12, rtol = 8.881784197001252e-16, maxiter = 100):
     ln = np.log
     x = np.sort(x)
     xmin = x[0]
