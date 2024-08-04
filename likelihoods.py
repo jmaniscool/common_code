@@ -44,7 +44,7 @@ For more details, please read:
 """
 
 #my packages
-from .brent import brent_findmin
+from .brent import brent_findmin, brent_findmin_discrete
 
 
 #python packages
@@ -62,6 +62,7 @@ mysqrt = np.vectorize(mp.sqrt)
 myerfc = np.vectorize(mp.erfc)
 myround = np.vectorize(round)
 myfloat = np.vectorize(float)
+myint = np.vectorize(int)
 
 ln = np.log
 pi = np.pi
@@ -169,6 +170,18 @@ def pl_like(x,xmin,xmax,alpha):
     ll = np.sum(dist)
     return ll, dist
 
+#The discrete version of the powerlaw likelihood function.
+@numba.njit
+def pl_like_discrete(normx,normxmin,normxmax,alpha):
+    ll = 0
+    normx = normx[(normx >= normxmin)* (normx <= normxmax)]
+    if alpha == 1:
+        return -1e-12, np.zeros(len(normx))
+    C = 1/np.sum(np.arange(normxmin,normxmax+1)**-alpha)
+    dist = np.log(C) - alpha*np.log(normx)
+    ll = np.sum(dist)
+    return ll, dist
+
 #exponential log likelihood. Matches with powerlaw library!
 def exp_like(x,xmin,xmax,lam):
     if lam <=0:
@@ -230,6 +243,33 @@ def find_pl(x,xmin,xmax = 1e6):
     #myfit = optimize.minimize_scalar(mymean, bounds = (1,30))
     alpha = brent_findmin(xc)
     ll = pl_like(xc,xmin,xmax,alpha)[0]
+    
+    return alpha,ll
+
+#discrete version of find_pl
+@numba.njit
+def find_pl_discrete(x,xmin,xmax, stepsize):
+    """
+    """
+    
+    #round so we are working in integer units.
+    normx = np.rint(x/stepsize)
+    normxmin = np.rint(xmin/stepsize)
+    normxmax = np.rint(xmax/stepsize)
+    
+    #Remove from consideration all events that are rounded down to zero, have xmin be equal to 1.
+    if normxmin == 0:
+        normxmin = 1
+    if normxmax == 0:
+        normxmax = 1
+        
+    #normx[normx == 0] = 1
+
+    normx = normx[(normx >= normxmin)*(normx <= normxmax)]
+    
+    alpha = brent_findmin_discrete(normx)
+    
+    ll = pl_like_discrete(normx,normxmin,normxmax,alpha)[0]
     
     return alpha,ll
 

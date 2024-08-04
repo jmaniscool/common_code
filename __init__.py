@@ -27,6 +27,7 @@ from .decorator import optimal_colors12
 
 #likelihoods (contains likelihoods, generator functions, and relative testing of distributions.)
 from .likelihoods import find_pl
+from .likelihoods import find_pl_discrete
 from .likelihoods import find_tpl
 from .likelihoods import find_exp
 from .likelihoods import find_lognormal
