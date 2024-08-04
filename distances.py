@@ -40,25 +40,6 @@ def find_d_sorted(data, alpha):
     ecdf = np.arange(1,len(x) + 1)/len(x) #empirical CDF = (1/N, 2/N, ... 1)
     return np.amax(np.abs(ecdf-cdf_t))
 
-#discrete version of find_d.
-@numba.njit
-def find_d_sorted_discrete(data, alpha):
-    if alpha <= 1:
-        return 1e12
-    #x = np.sort(data) #change to just data if the input data is sorted
-    x = data
-    xmin = x[0]
-    xmax = x[-1]
-
-    #test if we are in a reasonable range. If not, then the CDF is approximately a delta function either at x = xmin or x = xmax. Doesn't matter for KS distance which you choose. Return 1 as an approximation.
-    test_xmin = np.log10(xmin)*(-alpha+1)
-    if test_xmin > 100:
-        return 1
-    cdf_t = (x**(1-alpha) - xmin**(1-alpha))/(xmax**(1-alpha) - xmin**(1-alpha))
-    
-    ecdf = np.arange(1,len(x) + 1)/len(x) #empirical CDF = (1/N, 2/N, ... 1)
-    return np.amax(np.abs(ecdf-cdf_t))
-
 #Fast implementation of numba unique, from https://github.com/numba/numba/pull/2959
 @numba.njit
 def numba_unique(array):
