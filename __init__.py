@@ -42,5 +42,6 @@ from .bootstrap import bca
 
 #montecarlo (contains find_pl_montecarlo)
 from .montecarlo import find_pl_montecarlo as find_pl_montecarlo
+from .montecarlo import find_p_wrap as find_p
 
 #functions that aren't used any more are contained in defunct.py, but are kept for posterity.
