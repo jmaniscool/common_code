@@ -9,6 +9,8 @@ from .distances import find_d_sorted, find_ad_sorted, find_nearest_idx
 from .brent import brent_findmin
 from .likelihoods import pl_gen
 
+arr = np.array
+
 #used to estimate the pq value from D in the monte carlo xmin/xmax. 10 terms is plenty to get extremely high accuracy.
 @numba.njit
 def expfun(x,numterms = 10):
@@ -20,6 +22,27 @@ def expfun(x,numterms = 10):
 
 #find the true p value (as compared to pq). See Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9).
 #If true p > 0.15 (or maybe p > 0.2), then the power law fit is good.
+
+#wrapper for accessing find_p from common_code. Does not need to be sorted.
+def find_p_wrap(x,xmin,xmax, runs = 150, discrete = False):
+    """
+    Find the p value of a given range of xmin/xmax via  KS distance simulation. See Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9).
+    
+    :param np.array x: The data to find the scaling regime over.
+    :param float xmin: Minimum of the scaling regime to test.
+    :param float xmax: Maximum of the scaling regime to test.
+    :param float runs: Number of runs to estimate the p-value for. Default is 150, which gives the correct p-value within ~10%.
+    :param bool discrete: Whether to use the continuous or discrete version of find_p. Default False.
+    
+    
+    """
+    if discrete == False:
+        return find_true_p(np.sort(x),xmin,xmax, runs, find_d_sorted)
+    
+    print("error. Discrete not implemented yet.")
+    return -1
+    
+
 @numba.njit
 def find_true_p(x,xmin,xmax,runs = 150, dfun = find_d_sorted):
     
