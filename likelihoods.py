@@ -236,7 +236,28 @@ def lognormal_like(data,xmin,xmax,mu,sigma):
 #v2 use minimize_scalar to be about 3-4x faster than nelder-mead.
 #v3 prefer to use brent_findmin to be another 10x faster.
 @numba.njit
-def find_pl(x,xmin,xmax = 1e6):
+def find_pl(x,xmin,xmax = 1e6, stepsize = None):
+    """
+    Find the power law between xmin and xmax, assuming continuous variable.
+    Parameters
+    ----------
+    x : array
+        The values to search for a power law within.
+    xmin : float
+        The minimum of the scaling regime.
+    xmax : float
+        The maximum of the scaling regime. The default is 1e6.
+    stepsize : float, optional
+        Added to ensure cross-compatability with discrete find_pl. Does not do anything in this function. The default is None.
+
+    Returns
+    -------
+    alpha : float
+        The optimal power law exponent.
+    ll : float
+        The log-likelihood at the optimal alpha.
+
+    """
     xc = x[(x >= xmin)*(x <= xmax)]
     #mymean = lambda a: -pl_like(xc,xmin,xmax,a)[0]
     #myfit = optimize.minimize(mymean,2,method = 'Nelder-Mead', bounds = [(1,1e6)])
@@ -246,13 +267,34 @@ def find_pl(x,xmin,xmax = 1e6):
     
     return alpha,ll
 
-#discrete version of find_pl
+#discrete version of find_pl. Use stepsize as a default parameter
 @numba.njit
-def find_pl_discrete(x,xmin,xmax, stepsize):
+def find_pl_discrete(x,xmin,xmax, stepsize = None):
     """
+    Find the power law in a discrete variable.
+
+    Parameters
+    ----------
+    x : float array
+        Contains the data to find the power law in. Should be discrete (i.e. only multiples of some dx value)
+    xmin : float
+        The minimum of the scaling regime.
+    xmax : float
+        The maximum of the scaling regime.
+    stepsize : float, optional
+        The stepsize of the discrete variable, i.e. the timestep for durations. If None, then stepsize will be set to min(x)/100 (i.e. small enough that the variable is assumed continuous). The default is None.
+
+    Returns
+    -------
+    alpha : float
+        The optimal power law exponent.
+    ll : float
+        The log-likelihood at the optimal alpha.
+
     """
-    
-    #round so we are working in integer units.
+    if stepsize is None:
+        stepsize = min(x)/100 #if not specified, assume the stepsize is small enough that we don't need to worry.
+
     normx = np.rint(x/stepsize)
     normxmin = np.rint(xmin/stepsize)
     normxmax = np.rint(xmax/stepsize)
@@ -262,8 +304,6 @@ def find_pl_discrete(x,xmin,xmax, stepsize):
         normxmin = 1
     if normxmax == 0:
         normxmax = 1
-        
-    #normx[normx == 0] = 1
 
     normx = normx[(normx >= normxmin)*(normx <= normxmax)]
     
