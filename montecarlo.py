@@ -99,7 +99,7 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     
     data = np.sort(data) 
     dfun = find_d_sorted
-    defaults = [1,0,0,0,0]
+    defaults = [1,0,0]
     if calc_p == False:
         pcrit = pqcrit
         
@@ -179,7 +179,7 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
         alpha = attempted_alphas[minidx]
         pq = attempted_pqs[minidx]
         p = attempted_pqs[minidx]
-        return alpha,xmin,xmax,pq,p,-2,-2
+        return xmin,xmax,alpha
         
     possible_xmins = attempted_xmins[idxs]
     possible_xmaxs = attempted_xmaxs[idxs]
@@ -226,4 +226,4 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     p = possible_ps2[minidx]
     
 
-    return alpha,xmin,xmax,pq,p,len(possible_pqs),len(possible_ps2)
+    return xmin,xmax,alpha
