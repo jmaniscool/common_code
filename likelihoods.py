@@ -118,6 +118,44 @@ def pl_gen(datalen,xmin,xmax,alpha):
     x = np.random.rand(datalen)
     X = xmax/xmin
     out = (1-x*(1-X**(1-alpha)))**(1/(1-alpha))*xmin
+    return out
+
+#produces a power law between xmin and xmax when supplied with a vector of random variables with elements 0 < r < 1
+@numba.njit
+def pl_gen_discrete(datalen,xmin,xmax,alpha):
+    """
+    Generate a set of discrete data that obey a power law relationship, using 
+    the approximation given in Clauset et al 2009 just above equation D6.
+    
+    Sources
+    [1] Clauset et al 2009. Power-Law Distributions in Empirical Data.
+
+    Parameters
+    ----------
+    datalen : int
+        The length of the data.
+    xmin : int
+        The minimum value of the scaling regime, x >= xmin. Clauset et al 2009
+        claim that this approximation is good to, at worst, 10% for xmin = 1
+        but in practice is less than 1% when xmin = 10.
+    xmax : int
+        The maximum value of the scaling regime, x <= xmax.
+    alpha : float
+        The underlying power-law index in the data.
+
+    Returns
+    -------
+    out : array of ints
+        Data that are (approximately) power-law distributed in discrete x.
+
+    """
+    
+    x = np.random.rand(datalen)
+    xmin_p = xmin - 0.5
+    xmax_p = xmax - 0.5
+    X = xmax_p/xmin_p
+    out = np.floor((1-x*(1-X**(1-alpha)))**(1/(1-alpha))*xmin_p + 0.5)
+    
     return out    
 
 #much faster and accurate enough generator for lognormal data.
