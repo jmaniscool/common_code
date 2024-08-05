@@ -14,10 +14,40 @@ import scipy
 arr = np.array
 
 #find nearest value in an index. From StackOverflow.
+#Returns the first index where array - value is closest to zero. Useful for min
 @numba.njit
 def find_nearest_idx(array, value):
     idx = (np.abs(array - value)).argmin()
     return idx
+
+@numba.njit
+def find_nearest_idx_discrete(data,value, first):
+    """
+    Find the nearest index where value is observed in sorted data. 
+    In the case of a tie, returns the first index where the value 
+    is obtained if first > 0, otherwise returns the last index 
+    where the value is obtained.
+    
+    Parameters
+    ----------
+    data : array
+        An array of sorted values.
+    value : float
+        The value to search for.
+    first : float
+        If first > 0, return the first index that is nearest to the input. Else, return the last index.
+
+    Returns
+    -------
+    int
+        The index where value is closest to data.
+
+    """
+    test = np.abs(data - value)
+    idxs = np.where(test == np.min(test))[0]
+    if first > 0:
+        return idxs[0]
+    return idxs[-1]
 
 #ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
 #Validated against https://doi.org/10.2478/s11600-013-0154-9 on 6-12-24, though the way they define the CDF goes from 1 to 0 and thus some algebra is required to get the same result as below.
@@ -40,8 +70,22 @@ def find_d_sorted(data, alpha):
     ecdf = np.arange(1,len(x) + 1)/len(x) #empirical CDF = (1/N, 2/N, ... 1)
     return np.amax(np.abs(ecdf-cdf_t))
 
+#Fast implementation of numba unique, from https://github.com/numba/numba/pull/2959
 @numba.njit
-def find_d_discrete_sorted(normdata, alpha):
+def numba_unique(array):
+    b = np.sort(array.ravel())
+    unique = list(b[:1])
+    counts = [1 for _ in unique]
+    for x in b[1:]:
+        if x != unique[-1]:
+            unique.append(x)
+            counts.append(1)
+        else:
+            counts[-1] += 1
+    return arr(unique), arr(counts)
+
+@numba.njit
+def find_d_sorted_discrete(normdata, alpha):
     """
     Find the KS distance for a discrete data, normdata, represented in units of its stepsize.
 
@@ -59,46 +103,6 @@ def find_d_discrete_sorted(normdata, alpha):
         The KS distance. Always will be between 0 and 1.
 
     """
-    if alpha <= 1:
-        return 1e12
-    x = normdata
-    xmin = x[0]
-    xmax = x[-1]
-    
-    vals,y = numba_unique(x)
-    y = np.cumsum(y)
-    ecdf = y/y[-1]
-    #my version which uses partial sums and is jittable
-    #cdf_t = np.ones(len(vals))
-    #inv_bot = 1/np.sum(np.arange(xmin,xmax+1)**-alpha)
-    #for i in range(len(vals)-1):
-    #    sumrange = np.arange(vals[i+1],xmax+1)
-    #    cdf_t[i] = 1 - np.sum(sumrange**-alpha)*inv_bot
-    
-    #Attempted version which aligns better with ecdf
-    cdf_t = np.ones(len(vals))
-    inv_bot = 1/np.sum(np.arange(xmin,xmax+1)**-alpha)
-    for i in range(len(vals)):
-        sumrange = np.arange(xmin,vals[i] + 1)
-        cdf_t[i] = np.sum(sumrange**-alpha)*inv_bot
-    return np.amax(np.abs(ecdf-cdf_t))
-
-#Fast implementation of numba unique, from https://github.com/numba/numba/pull/2959
-@numba.njit
-def numba_unique(array):
-    b = np.sort(array.ravel())
-    unique = list(b[:1])
-    counts = [1 for _ in unique]
-    for x in b[1:]:
-        if x != unique[-1]:
-            unique.append(x)
-            counts.append(1)
-        else:
-            counts[-1] += 1
-    return arr(unique), arr(counts)
-
-@numba.njit
-def find_d_sorted_discrete(normdata, alpha):
     if alpha <= 1:
         return 1e12
     x = normdata
