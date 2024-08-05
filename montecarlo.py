@@ -5,8 +5,8 @@ Created on Fri Jul  5 14:23:05 2024
 """
 import numba
 import numpy as np
-from .distances import find_d_sorted, find_ad_sorted, find_nearest_idx
-from .brent import brent_findmin
+from .distances import find_d_sorted, find_ad_sorted, find_nearest_idx, find_d_sorted_discrete,find_nearest_idx_discrete
+from .brent import brent_findmin, brent_findmin_discrete
 from .likelihoods import pl_gen
 
 arr = np.array
@@ -86,32 +86,101 @@ def find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun):
 #use a monte carlo approach of finding xmin, xmax, and alpha using AD statistic. Parallelization and njit() has improved speed to ~600 ms per star with these options.
 def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 100, dist_type = 'AD', calc_p = True):
     """
-    Use a Monte Carlo approach to find xmin,xmax, and alpha using KS statistics.
-    Calculate KS distance for [runs] samples of xmin/xmax from [data]. Return the run where xmax/xmin is largest and pq > pcrit.
-    Parameters:
-        data (np.array or list): The data to find the power law from.
-        runs (int): The number of random choices of xmin/xmax to calculate pq from.
-        pqcrit (float): the critical value for pq; a run is labeled as possible if pq > pcrit
-        pcrit (float): the critical value for true p.
-        dist_type (string): either KS for Kolmogorov-Smirnov or AD for Anderson-Darling tests.
+    Find the best xmin and xmax for a power law scaling regime in data using a monte-carlo approach.
+    The approach works by quantifying the KS (or AD) distance for many choices of xmin/xmax and
+    usiung the maximum likelihood estimated alpha, from [1]. Then, a 'fake' p-value (pq) is generated
+    using a simple (but incorrect) formula in terms of the KS distance which always overestimates the
+    true p value[1,2]. All runs with pq > pqcrit are labeled as candidate runs. Then, for each
+    candidate runs, pruns are used to estimate the true p value [1]. The xmin/xmax are chosen as
+    those that have p > pcrit and have the largest value of xmax/xmin.
+    
+    TODO:
+        --Work to derive a function for calculating 'fake' pq from AD value. Relies on quadratic statistics
+        --Obtain method against biasing values of xmax that are too high
+        --Obtain method for estimating confidence intervals on estimated xmin and xmax.
+    
+    Sources
+    [1] Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9).
+    [2] DOI: 10.4236/am.2020.113018 by Jan Vrbik 2020 which gives the more accurate formula for false p value from D.
+
+    Parameters
+    ----------
+    data : array
+        An array of data to search for xmin and xmax in. If using the 'discrete' option, must be normalized to the timestep dt before being input.
+    runs : int, optional
+        The number of monte-carlo runs to use to find the best xmin/xmax pair. A fake pq value is generated for each of these pairs of xmin/xmax. Good results are generally found with runs > 1000, but generally runs > 20000 is not needed. The default is 2000.
+    pqcrit : float, optional
+        The value of the 'fake' p value, pq, that the scaling regime between xmin/xmax must
+        be higher than to be considered possible. 0 < pqcrit < 1, and the higher pq is, the 
+        more strict the choice is at the cost of throwing out many usually very good runs.
+        Good performance is generally obtained with 0.2 < pqcrit < 0.5.
         
+        pqcrit is used as an initial sieve to initially throw out bad choices of xmin/xmax
+        because calculating the 'true' p value is far more computationally costly and is
+        always less than pq. The default is 0.35.
+    pcrit : float, optional
+        The value of the 'true' p value that the scaling regime between xmin/xmax must be
+        higher than to be considered possible. 0 < pcrit < 1, and higher is more strict
+        at the cost of throwing out many usually very good runs. Good performance is
+        generally obtained with 0.15 < pcrit < 0.35. The default is 0.25.
+    pruns : float, optional
+        The number of runs per pair of xmin/xmax with pq > pqcrit used to calculate the
+        'true' p-value. pruns should be at least 100, but much higher is generally not 
+        worth the computational cost since the relative error is at worst 10% at pruns =
+        100. The default is 100.
+    dist_type : string, optional
+        The type of distribution to calculate the 'D' metric with. Use 'KS' for the 
+        Kolmogorov-Smirnov distance, 'AD' for the Anderson-Darling distance, and 'discrete'
+        for the discrete KS distance. AD distance is generally slightly better than KS, but
+        the computational cost is higher. However, KS distance performs mostly just as well
+        on test data. The 'discrete' case always uses the discrete KS distance. The default 
+        is 'AD'.
+    calc_p : boolean, optional
+        If True, calculates the p value. Otherwise, sets p threshold to the pq threshold, so
+        p is not calculated in an effort to save time. The default is True.
+
+    Returns
+    -------
+    xmin: float
+        The minimum of the scaling regime.
+    xmax: float
+        The maximum of the scaling regime.
+    alpha: float
+        The optimal alpha found.
     """
     
     data = np.sort(data) 
     dfun = find_d_sorted
-    defaults = [1,0,0]
+    distfun = find_d_sorted
+    brent = brent_findmin
+    nearest_first = find_nearest_idx
+    nearest_last = find_nearest_idx
+    
+    defaults = [0,0,1]
     if calc_p == False:
         pcrit = pqcrit
         
     if dist_type == 'KS':
+        distfun = find_d_sorted
         dfun = find_d_sorted
+        brent = brent_findmin
+        nearest_first = find_nearest_idx
+        nearest_last = find_nearest_idx
     elif dist_type == 'AD':
-        dfun = find_ad_sorted
+        distfun = find_ad_sorted
+    elif dist_type == 'discrete':
+        distfun = find_d_sorted_discrete
+        dfun = find_d_sorted_discrete
+        brent = brent_findmin_discrete
+        nearest_first = lambda x,val : find_nearest_idx_discrete(x,val,1)
+        nearest_last = lambda x,val : find_nearest_idx_discrete(x,val,0)
+        if np.any(data < 1):
+            print('Error. Please ensure data is discretized in terms of step size before using discrete option. Returning.')
+            return defaults
     else:
-        print('Error. Please input a valid distance type (either KS or AD)')
+        print('Error. Please input a valid distance type (either KS, AD, or discrete)')
         return defaults
 
-    #As of 6-12-24, use an updated method that searches for any with pq > 0.35 (gives p approx 0.15 or so) then selects the run that maximizes xmax/xmin
     #NOTE: due to a bug in numba (conditional statements don't work in for loops), we cannot compile this core function to njit.
     attempted_xmins = np.ones(runs)
     attempted_xmaxs = np.ones(runs)
@@ -129,8 +198,8 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     for i in range(runs):
         trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
         trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
-        trial_xmin_idx = find_nearest_idx(data,trial_xmin)
-        trial_xmax_idx = find_nearest_idx(data,trial_xmax)
+        trial_xmin_idx = nearest_first(data,trial_xmin)
+        trial_xmax_idx = nearest_last(data,trial_xmax)
         trial_xmin = data[trial_xmin_idx]
         trial_xmax = data[trial_xmax_idx]
         
@@ -139,16 +208,16 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
         while (trial_xmax_idx - trial_xmin_idx < 10) or (trial_xmax < 2*trial_xmin):
             trial_xmin = np.exp(log_xmin + log_range*np.random.rand())
             trial_xmax = np.exp(log_xmin + log_range*np.random.rand())
-            trial_xmin_idx = find_nearest_idx(data,trial_xmin)
-            trial_xmax_idx = find_nearest_idx(data,trial_xmax)
+            trial_xmin_idx = nearest_first(data,trial_xmin)
+            trial_xmax_idx = nearest_last(data,trial_xmax)
             trial_xmin = data[trial_xmin_idx]
             trial_xmax = data[trial_xmax_idx]
         trimmed = data[trial_xmin_idx:trial_xmax_idx+1]
-        alpha_hat = brent_findmin(trimmed)
+        alpha_hat = brent(trimmed)
         tmpd = 1
         if alpha_hat > 1:
-            attempted_ds[i] = dfun(trimmed,alpha_hat)
-            tmpd = find_d_sorted(trimmed,alpha_hat)
+            attempted_ds[i] = distfun(trimmed,alpha_hat)
+            tmpd = dfun(trimmed,alpha_hat)
         n = len(trimmed)
         
         
@@ -165,8 +234,6 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
         attempted_xmins[i] = trial_xmin
         attempted_xmaxs[i] = trial_xmax
     
-    #Depreciated as of 6-12-24. The best index is found as the one that maximizes xmax/xmin while being above pq > pcrit
-    #minidx = np.argmin(attempted_ds)
     
     #find the possible indices. For each possible index, calculate the true p value using simulation.
     idxs = np.where(attempted_pqs > pqcrit)[0]
@@ -206,14 +273,13 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
         alpha = possible_alphas[minidx]
         pq = possible_pqs[minidx]
         p = possible_ps[minidx]
-        return alpha,xmin,xmax,pq,p,-1,-1
+        return xmin,xmax,alpha
     
     possible_xmins2 = possible_xmins[idxs2]
     possible_xmaxs2 = possible_xmaxs[idxs2]
     possible_alphas2 = possible_alphas[idxs2]
     possible_pqs2 = possible_pqs[idxs2]
     possible_ps2 = possible_ps[idxs2]
-    #print(len(possible_ps2))
     
     minidx = np.argmax(possible_xmaxs2/possible_xmins2)
     
