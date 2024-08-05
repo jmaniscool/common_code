@@ -7,7 +7,7 @@ import numba
 import numpy as np
 from .distances import find_d_sorted, find_ad_sorted, find_nearest_idx, find_d_sorted_discrete,find_nearest_idx_discrete
 from .brent import brent_findmin, brent_findmin_discrete
-from .likelihoods import pl_gen
+from .likelihoods import pl_gen, pl_gen_discrete
 
 arr = np.array
 
@@ -24,31 +24,60 @@ def expfun(x,numterms = 10):
 #If true p > 0.15 (or maybe p > 0.2), then the power law fit is good.
 
 #wrapper for accessing find_p from common_code. Does not need to be sorted.
-def find_p_wrap(x,xmin,xmax, runs = 150, discrete = False):
+def find_p_wrap(x,xmin,xmax, runs = 150):
     """
+    
     Find the p value of a given range of xmin/xmax via  KS distance simulation. See Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9).
-    
-    :param np.array x: The data to find the scaling regime over.
-    :param float xmin: Minimum of the scaling regime to test.
-    :param float xmax: Maximum of the scaling regime to test.
-    :param float runs: Number of runs to estimate the p-value for. Default is 150, which gives the correct p-value within ~10%.
-    :param bool discrete: Whether to use the continuous or discrete version of find_p. Default False.
-    
-    
-    """
-    if discrete == False:
-        return find_true_p(np.sort(x),xmin,xmax, runs, find_d_sorted)
-    
-    print("error. Discrete not implemented yet.")
-    return -1
-    
 
+    Parameters
+    ----------
+    x : np.array x
+        The data to find the scaling regime over.
+    xmin : float
+        Minimum of the scaling regime to test.
+    xmax : float
+        Maximum of the scaling regime to test.
+    runs : float, optional
+        Number of runs to estimate the p-value for. Default is 150, which gives the correct p-value within ~10%. The default is 150.
+
+    Returns
+    -------
+    p : float
+        The estimated p value, i.e. the number of runs where d_data > d_synth.
+    perr : float
+        The 68% CI on the estimated p value. Will have coefficient of variation at most less than 10% if runs = 150.        
+    """
+    return find_true_p(np.sort(x),xmin,xmax, runs, find_d_sorted)
+
+#wrapper for accessing find_p_discrete from common_code. Does not need to be sorted.
 @numba.njit
-def find_true_p(x,xmin,xmax,runs = 150, dfun = find_d_sorted):
+def find_true_p(x,xmin,xmax, runs = 150, dfun = find_d_sorted):
+    """
     
+    Find the p value of a given range of xmin/xmax via  KS distance simulation. See Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9).
+
+    Parameters
+    ----------
+    x : np.array x
+        The data to find the scaling regime over. x is assumed to be discretized by the stepsize of the data.
+    xmin : float
+        Minimum of the scaling regime to test.
+    xmax : float
+        Maximum of the scaling regime to test.
+    runs : float, optional
+        Number of runs to estimate the p-value for. Default is 150, which gives the correct p-value within ~10%. The default is 150.
+
+    Returns
+    -------
+    p : float
+        The estimated p value, i.e. the number of runs where d_data > d_synth.
+    perr : float
+        The 68% CI on the estimated p value. Will have coefficient of variation at most less than 10% if runs = 150.        
+    """
     tot = 0
     p = 1
     sigp = 0
+
     xmin_idx = find_nearest_idx(x,xmin)
     xmax_idx = find_nearest_idx(x,xmax)
     x = x[xmin_idx:xmax_idx + 1]
@@ -61,12 +90,67 @@ def find_true_p(x,xmin,xmax,runs = 150, dfun = find_d_sorted):
         ds = dfun(synth,asynth)
         if ds >= de:
             tot = tot + 1
+        
+    p = tot/runs
+    sigp = np.sqrt(p*(1-p)/runs) #1 sigma (68% CI)
+    
+    return p,sigp
+
+#wrapper for accessing find_p_discrete from common_code. Does not need to be sorted.
+def find_p_discrete_wrap(x,xmin,xmax, runs = 150):
+    """
+    
+    Find the p value of a given range of xmin/xmax via  KS distance simulation. See Deluca & Corrall 2013 (https://doi.org/10.2478/s11600-013-0154-9).
+
+    Parameters
+    ----------
+    x : np.array x
+        The data to find the scaling regime over. x is assumed to be discretized by the stepsize of the data.
+    xmin : float
+        Minimum of the scaling regime to test.
+    xmax : float
+        Maximum of the scaling regime to test.
+    runs : float, optional
+        Number of runs to estimate the p-value for. Default is 150, which gives the correct p-value within ~10%. The default is 150.
+
+    Returns
+    -------
+    p : float
+        The estimated p value, i.e. the number of runs where d_data > d_synth.
+    perr : float
+        The 68% CI on the estimated p value. Will have coefficient of variation at most less than 10% if runs = 150.        
+    """
+    
+    return find_true_p_discrete(np.sort(x),xmin,xmax, runs, find_d_sorted_discrete)
+    
+
+@numba.njit
+def find_true_p_discrete(x,xmin,xmax,runs = 150, dfun = find_d_sorted_discrete):
+    
+    tot = 0
+    p = 1
+    sigp = 0
+
+    xmin_idx = find_nearest_idx_discrete(x,xmin,1)
+    xmax_idx = find_nearest_idx_discrete(x,xmax,0)
+    x = x[xmin_idx:xmax_idx + 1]
+    n = len(x)
+    alpha = brent_findmin_discrete(x)
+    de = dfun(x,alpha)
+    for i in range(runs):
+        synth = np.sort(pl_gen_discrete(n,xmin,xmax,alpha))
+        asynth = brent_findmin_discrete(synth)
+        ds = dfun(synth,asynth)
+        if ds >= de:
+            tot = tot + 1
         #tot = tot + (ds >= de) #if ds > de, increment tot
         
     p = tot/runs
     sigp = np.sqrt(p*(1-p)/runs) #1 sigma (68% CI)
     
     return p,sigp
+
+
 #core of the find_p part of the montecarlo code. Broken into its own jitted function to improve overhead in communicating between C and Python.
 #very minimal speed increase (<10%) compared to python implementation.
 @numba.njit(parallel = True)
@@ -81,7 +165,22 @@ def find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun):
         possible_ps[i] = find_true_p(trimmed,xmin,xmax, runs = pruns, dfun = dfun)[0]
     
     return possible_ps
-        
+
+
+#core of the find_p part of the montecarlo code (discrete data). Broken into its own jitted function to improve overhead in communicating between C and Python.
+#very minimal speed increase (<10%) compared to python implementation.
+@numba.njit(parallel = True)
+def find_p_core_discrete(data,possible_xmins,possible_xmaxs, pruns, dfun):
+    possible_ps = np.zeros(len(possible_xmins))
+    for i in numba.prange(len(possible_ps)):
+        xmin = possible_xmins[i]
+        xmax = possible_xmaxs[i]
+        xmin_idx = find_nearest_idx_discrete(data,xmin,1)
+        xmax_idx = find_nearest_idx_discrete(data,xmax,0)
+        trimmed = data[xmin_idx:xmax_idx + 1]
+        possible_ps[i] = find_true_p_discrete(trimmed,xmin,xmax, runs = pruns, dfun = dfun)[0]
+    
+    return possible_ps        
     
 #use a monte carlo approach of finding xmin, xmax, and alpha using AD statistic. Parallelization and njit() has improved speed to ~600 ms per star with these options.
 def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 100, dist_type = 'AD', calc_p = True):
@@ -155,6 +254,7 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     brent = brent_findmin
     nearest_first = find_nearest_idx
     nearest_last = find_nearest_idx
+    pfun = find_p_core
     
     defaults = [0,0,1]
     if calc_p == False:
@@ -174,6 +274,7 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
         brent = brent_findmin_discrete
         nearest_first = lambda x,val : find_nearest_idx_discrete(x,val,1)
         nearest_last = lambda x,val : find_nearest_idx_discrete(x,val,0)
+        pfun = find_p_core_discrete
         if np.any(data < 1):
             print('Error. Please ensure data is discretized in terms of step size before using discrete option. Returning.')
             return defaults
@@ -258,7 +359,7 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
         
     possible_ps = np.zeros(len(possible_pqs))
     if calc_p == True:
-        possible_ps = find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun)
+        possible_ps = pfun(data,possible_xmins,possible_xmaxs, pruns, dfun)
     else:
         possible_ps = possible_pqs
     
