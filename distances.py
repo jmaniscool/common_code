@@ -40,6 +40,49 @@ def find_d_sorted(data, alpha):
     ecdf = np.arange(1,len(x) + 1)/len(x) #empirical CDF = (1/N, 2/N, ... 1)
     return np.amax(np.abs(ecdf-cdf_t))
 
+@numba.njit
+def find_d_discrete_sorted(normdata, alpha):
+    """
+    Find the KS distance for a discrete data, normdata, represented in units of its stepsize.
+
+    Parameters
+    ----------
+    normdata : array of ints
+        The data to compute KS distance for. Represented in units of stepsize, i.e. normdata = 1 for something that is one stepsize long.
+        The data is also sorted, with its first element being xmin, and its last element being xmax. Inclusive.
+    alpha : float
+        The alpha value to test against.
+
+    Returns
+    -------
+    float
+        The KS distance. Always will be between 0 and 1.
+
+    """
+    if alpha <= 1:
+        return 1e12
+    x = normdata
+    xmin = x[0]
+    xmax = x[-1]
+    
+    vals,y = numba_unique(x)
+    y = np.cumsum(y)
+    ecdf = y/y[-1]
+    #my version which uses partial sums and is jittable
+    #cdf_t = np.ones(len(vals))
+    #inv_bot = 1/np.sum(np.arange(xmin,xmax+1)**-alpha)
+    #for i in range(len(vals)-1):
+    #    sumrange = np.arange(vals[i+1],xmax+1)
+    #    cdf_t[i] = 1 - np.sum(sumrange**-alpha)*inv_bot
+    
+    #Attempted version which aligns better with ecdf
+    cdf_t = np.ones(len(vals))
+    inv_bot = 1/np.sum(np.arange(xmin,xmax+1)**-alpha)
+    for i in range(len(vals)):
+        sumrange = np.arange(xmin,vals[i] + 1)
+        cdf_t[i] = np.sum(sumrange**-alpha)*inv_bot
+    return np.amax(np.abs(ecdf-cdf_t))
+
 #Fast implementation of numba unique, from https://github.com/numba/numba/pull/2959
 @numba.njit
 def numba_unique(array):
