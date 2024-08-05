@@ -34,6 +34,7 @@ from .likelihoods import find_lognormal
 from .likelihoods import llr_wrap as llr
 from .likelihoods import ad
 from .likelihoods import pl_gen
+from .likelihoods import pl_gen_discrete
 from .likelihoods import tpl_gen
 from .likelihoods import generate_test_data_with_xmax as generate_test_data
 
@@ -44,5 +45,6 @@ from .bootstrap import bca
 #montecarlo (contains find_pl_montecarlo)
 from .montecarlo import find_pl_montecarlo as find_pl_montecarlo
 from .montecarlo import find_p_wrap as find_p
+from .montecarlo import find_p_discrete_wrap as find_p_discrete
 
 #functions that aren't used any more are contained in defunct.py, but are kept for posterity.
