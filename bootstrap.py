@@ -345,8 +345,37 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.
 
 #the core of the BCa correction given theta_hat and jackknifed samples theta_jk. Validated against scipy.stats.bootstrap.
 def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
+    """
+    Run the core of the BCA algorithm. These are the steps shared between all BCA estimations.
+    Specifically, for a bunch of bootstrap estimates bootstrap_estimates and jackknifed resamples theta_jk,
+    the BCA algorithm determines how to correct for bias in the boostrap to give asymmetric confidence intervals.
     
-    from matplotlib import pyplot as plt
+    Sources
+    Efron B. An Introduction to the Bootstrap (1993)
+
+    Parameters
+    ----------
+    theta_hat : float
+        The optimal value of the parameter, i.e. tau when you do find_pl for smin <= s <= smax.
+        If the optimal theta_hat is far from the median of bootstrap_estimates, then the bootstrap estimates are biased.
+    theta_jk : float array
+        The jackknifed estimates of theta. Obtained by removing one index at a time from the data, then estimating theta.
+        The jackknifed estimates are used to estimate the acceleration, i.e. related to the skew
+    bootstrap_estimates : float array
+        The bootstrap estimates from the bootstrap code.
+    alpha : float 
+        The confidence to obtain the values at. I.e. alpha = 0.05 for 95% CI.
+
+    Returns
+    -------
+    theta_hat : float
+        The optimal theta.
+    ci_lower : float
+        The lower bound of the confidence interval, corrected for bias and acceleration.
+    ci_upper : float
+        The upper bound of the confidence interval, corected for bias and acceleration.
+
+    """
     
     z0 = scipy.stats.norm.ppf((np.sum(bootstrap_estimates < theta_hat) + 0.5) / (len(bootstrap_estimates) + 1))
 
@@ -389,35 +418,46 @@ def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
 #Find the bias corrected and accelerated (BCa) confidence intervals for power law exponents from the bootstrapping function.
 #Returns the true value of the statistic and its lower and upper confidence intervals given output from bootstrap function.
 #Method validated against scipy.stats.bootstrap with BCa selected.
-def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95):    
+def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95, stepsize = None):
     alpha = 1-ci #get alpha (e.g. confidence interval of 95% means alpha = 0.05)
     
     #compute the "true" value of theta
     xc = x[(x >= xmin)*(x <= xmax)]
-    theta_hat = find_pl(xc,xmin,xmax)[0]
+    numdat = len(xc)
+    theta_hat = -1
+    theta_jk = np.zeros(numdat)
+    f = find_pl
+    if stepsize is not None:
+        f = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,stepsize)
+
+    theta_hat = f(xc,xmin,xmax)[0]
     
     #Jackknife estimation of acceleration (from Scipy)
-    numdat = len(xc)
     theta_jk = np.zeros(numdat)
     for i in range(numdat):
-        theta_jk[i] = find_pl(np.delete(xc,i),xmin,xmax)[0]
-
-    #calculate
+        theta_jk[i] = f(np.delete(xc,i),xmin,xmax)[0]
+            
     
     if (theta_hat == 1) or (np.sum(theta_jk) == numdat):
         return theta_hat, np.nan, np.nan
     
+    #do the bias correction and acceleration
     return bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha)
 
 #compute the BCA confidence intervals for combined statistics. i.e. like (tau-1)/(alpha-1)
-def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95):
+def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95, ystepsize = None):
     alpha = 1-ci
     
     xc = x[(x >= xmin)*(x <= xmax)]
     yc = y[(y >= ymin)*(y <= ymax)]
     
-    thetax_hat = find_pl(xc,xmin,xmax)[0]
-    thetay_hat = find_pl(yc,ymin,ymax)[0]
+    fx = find_pl
+    fy = find_pl
+    if ystepsize is not None:
+        fy = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,ystepsize)
+    
+    thetax_hat = fx(xc,xmin,xmax)[0]
+    thetay_hat = fy(yc,ymin,ymax)[0]
 
     #get the mean value of (tau-1)/(alpha-1)
     theta_hat = (thetax_hat - 1)/(thetay_hat - 1)
@@ -426,19 +466,19 @@ def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95):
     ny = len(yc)
     
     #The real way would be to jackknife over avalanches.
-    #That is, remove avalanches (1) one by one (remove same index i,j), (2) compute xc and yc from xmin, xmax, ymin, ymax, (3) compute tau, alpha from the subsample
+    #That is, remove avalanches (1) one by one (remove same index i,j), (2) compute xc and yc from xmin, xmax, ymin, ymax, (3) compute tau, alpha from the subsample. However, because there are different number of events in the size scaling regime versus the duration scaling regime, this is untenable.
     
     #assuming samples of x and y are independent (they're not! But the resampling in bootstrapping assumes s,d,etc are independent)
     #jackknife over thetax
     thetax_jk = np.zeros(nx)
     for i in range(nx):
-        thetax_jk[i] = find_pl(np.delete(xc,i),xmin,xmax)[0]
+        thetax_jk[i] = fx(np.delete(xc,i),xmin,xmax)[0]
     
     #jackknife over thetay
     thetay_jk = np.zeros(ny)
     for i in range(ny):
-        thetay_jk[i] = find_pl(np.delete(yc,i),ymin,ymax)[0]   
-    #get the total jackknife (??)
+        thetay_jk[i] = fy(np.delete(yc,i),ymin,ymax)[0]   
+    #get the total jackknife as an nx*ny array (i.e. removing each of xi and yi then kron-ing them together and flattening)
     theta_jk = np.zeros(nx*ny)
     for i in range(nx):
         for j in range(ny):
@@ -461,12 +501,12 @@ def bca_fit(x,y,xmin,xmax,bootstrap_estimates,ci = 0.95):
     logxc = np.log10(xc)
     logyc = np.log10(yc)
 
-    theta_hat = scipy.stats.linregress(logxc,logyc).slope
+    theta_hat = fit_poly(logxc,logyc,1)[0] #replace with jit-able version in case I need the speedup later.
     
     nx = len(xc)
     theta_jk = np.zeros(nx)
     for i in range(nx):
-        theta_jk[i] = scipy.stats.linregress(np.delete(logxc,i),np.delete(logyc,i)).slope
+        theta_jk[i] = fit_poly(np.delete(logxc,i),np.delete(logyc,i),1)[0]
 
 
     if (theta_hat == 1) or (np.sum(theta_jk) == nx):
@@ -476,7 +516,7 @@ def bca_fit(x,y,xmin,xmax,bootstrap_estimates,ci = 0.95):
 
 #BCa to determine the exponent relationship confidence intervals, i.e. (tau-1)/(alpha-1) = snz
 #HOW TO USE: pass in bca_rel(s,d,smin,smax,dmin,dmax,lhss,snzs, ci = 0.95) to get bootstrapping.
-def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci = 0.95):
+def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci = 0.95, ystepsize = None):
     
     from matplotlib import pyplot as plt
     alpha = 1 - ci
@@ -484,12 +524,18 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
     xc = x[(x>= xmin)*(x <= xmax)]
     yc = y[(y >= ymin)*(y <= ymax)]
     
+    fx = find_pl
+    fy = find_pl
+    
+    if ystepsize is not None:
+        fy = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,ystepsize)
+        
     logxc = np.log10(xc)
     logyc = np.log10(y[(x >= xmin)*(x <= xmax)])
 
-    fit_hat = scipy.stats.linregress(logxc,logyc).slope
-    thetax_hat = find_pl(xc,xmin,xmax)[0]
-    thetay_hat = find_pl(yc,ymin,ymax)[0]
+    fit_hat = fit_poly(logxc,logyc,1)[0]
+    thetax_hat = fx(xc,xmin,xmax)[0]
+    thetay_hat = fy(yc,ymin,ymax)[0]
     if thetay_hat == 1:
         thetay_hat = np.nan
     
@@ -516,13 +562,13 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
         tmpx = np.delete(xc,i)
         tmplogx = np.delete(logxc,i)
         tmplogy = np.delete(logyc,i)
-        thetax_jk[i] = find_pl(tmpx,xmin,xmax)[0]
-        thetafit_jk[i] = scipy.stats.linregress(tmplogx,tmplogy).slope
+        thetax_jk[i] = fx(tmpx,xmin,xmax)[0]
+        thetafit_jk[i] = fit_poly(tmplogx,tmplogy,1)[0]
     
     #jackknife over thetay
     thetay_jk = np.zeros(ny)
     for i in range(ny):
-        thetay_jk[i] = find_pl(np.delete(yc,i),ymin,ymax)[0]
+        thetay_jk[i] = fy(np.delete(yc,i),ymin,ymax)[0]
         if thetay_jk[i] == 1:
             thetay_jk[i] = np.nan
                 
@@ -541,10 +587,10 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
     return bca_core(theta_hat,theta_jk,bootstrap_estimates,alpha)
 
 #calculate the BCa confidence interval for a given type, given a set of bootstrap estimates from bootstrap().
-def bca(x,xmin,xmax, bootstrap_estimates, mytype = 'power_law', y = None, ymin = None, ymax = None, ci = 0.95, bootstrap_estimates2 = None):
+def bca(x,xmin,xmax, bootstrap_estimates, mytype = 'power_law', y = None, ymin = None, ymax = None, ci = 0.95, bootstrap_estimates2 = None, stepsize = None):
     
     if mytype == 'power_law':
-        return bca_pl(x,xmin,xmax,bootstrap_estimates, ci = ci)
+        return bca_pl(x,xmin,xmax,bootstrap_estimates, ci = ci, stepsize = stepsize)
     #for all options below this, y, ymin, and ymax must be given.
     if y is None:
         print("error. For mytype == fit or mytype == lhs, please give both x and y and their corresponding min, max.")
@@ -552,12 +598,12 @@ def bca(x,xmin,xmax, bootstrap_estimates, mytype = 'power_law', y = None, ymin =
     if mytype == 'fit':
         return bca_fit(x,y,xmin,xmax,bootstrap_estimates, ci = ci)
     if mytype == 'lhs':
-        return bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci= ci)
+        return bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci= ci, ystepsize = stepsize)
     if bootstrap_estimates2 is None:
         print("error. For exponent relationship, please give both bootstrap_estimates (for i.e. (tau-1)/(alpha-1)) and bootstrap_estimates2 (for i.e. snz)")
         return 1,1,1
     if mytype == 'rel':
-        return bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci=ci)
+        return bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci=ci, ystepsize = stepsize)
 
     #if it's gotten to this point, the option is incorrect.
     print('Error. Please input mytype == power_law, lhs, fit, or rel.')
