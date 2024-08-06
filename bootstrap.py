@@ -24,7 +24,7 @@ import numba
 
 
 from .logbinning import logbinning
-from .likelihoods import find_pl, find_tpl
+from .likelihoods import find_pl, find_tpl, find_pl_discrete
 
 #bootstrap by picking random subset of avalanches, then restricting analysis to
 #smin < s < smax and dmin < d < dmax where smin/smax and dmin/dmax are varied
@@ -118,8 +118,8 @@ def binned_interp(bx,myinterp,xmin,xmax):
 
 #bootstrapping core. From an input list of avalanche s,d,smin,smax,etc, estimate a single run of exponents.
 @numba.njit
-def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fun, dex, ctr_max):
-    
+def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, dex, ctr_max, stepsize):
+    #All of the logic of the bootstrapping is done here. For more complete documentation, see bootstrap().
     length = len(s)
     nums = 0
     numd = 0
@@ -186,8 +186,11 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     #ctr < ctr_max and (cursmin >= cursmax or curdmin >= curdmax or len(scc) <= 3 or len(dcc) <= 3 or len(vmcc) <= 3 or all(scc == scc[0]*np.ones(len(scc))) or all(dcc == dcc[0]*np.ones(len(dcc))) or all(vmcc == vmcc[0]*np.ones(len(vmcc))))
 
     #find tau and alpha
-    tau = fun(scc,smin_star,smax_star)[0]
-    alpha = fun(dcc, dmin_star,dmax_star)[0]
+    tau = find_pl(scc,smin_star,smax_star)[0]
+    if stepsize is None:
+        alpha = find_pl(dcc,dmin_star,dmax_star)[0]
+    else:
+        alpha = find_pl_discrete(dcc, dmin_star,dmax_star,stepsize)[0]
     
     #find snz and (tau-1)/(alpha-1)
     #snz = scipy.stats.linregress(logscc,logdcc).slope
@@ -198,7 +201,7 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     
     #if vm is given, also calculate velocity statistics.
     if (vmin != 1)*(vmax != 1):
-        mu = fun(vmcc,vmin_star,vmax_star)[0]
+        mu = find_pl(vmcc,vmin_star,vmax_star)[0]
         #sp = scipy.stats.linregress(logscc,logvmcc).slope
         #pnz = scipy.stats.linregress(logdcc,logvmcc).slope
         sp = fit_poly(logscc,logvmcc,1)[0]
@@ -210,17 +213,87 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, fu
     return tau,alpha,mu, sdlhs,svlhs,dvlhs, snz,sp,pnz
 
 @numba.njit(parallel = True)
-def bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max):
+def bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,dex,ctr_max,stepsize):
+    #The core of the bootstrapping code, isolated, so that njit acceleration + parallelization could be used.
     vals = np.zeros((num_runs,9))
     for i in numba.prange(num_runs):
-        tmp = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
+        tmp = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,dex,ctr_max,stepsize)
         vals[i] = tmp
     
     return vals.transpose()
 
 #v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written
-def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.25, ctr_max = 10, min_events = 10):
+def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.25, ctr_max = 10, min_events = 10, stepsize = None):
+    """
+    Generate distributions of exponents that can be used to estimate the confidence interval.
+    For each avalanche, the size s, durations d, (and optionally max velocity vm) are inputs.
+    Also input the bounds of the size and duration scaling regimes (smin/smax and dmin/dmax respectively).
+    Ensure that index i of each of s,d, and vm corresponds to the same (i.e. the ith) avalanche.
     
+    Over num_runs runs, select random choices of smin* and smax* (and dmin* and dmax*) which
+    are within dex decades of the input smin/smax and dmin/dmax. Then, select a random
+    subsample of avalanches with replacement from the s,d vectors. Then, fit tau, alpha, and
+    snz from the subsample scaling s and scaling d (i.e. those within the smin*/smax* and
+    dmin*/dmax*). Optionally, thge scaling regime in vm is interpolated from the regime in s.
+    
+    Returns 9 arrays of num_runs floats, one for each of the estimated exponents + relations.
+    Each array of floats approximates the histogram underlying the distribution of each exponent.
+
+    Parameters
+    ----------
+    s : float array
+        The array of avalanche sizes. Index i corresponds to the i-th avalanche.
+    d : float array
+        The array of avalanche durations. Index i corresponds to the i-th avalanche, i.e. s[4] and d[4] are the size and duration of the 5th avalanche.
+    smin : float
+        The minimum size in the scaling regime
+    smax : float
+        The maximum size in the scaling regime.
+    dmin : float
+        The minimum duration in the scaling regime.
+    dmax : float
+        The maximum duration in the scaling regime.
+    vm : float array, optional
+        If not None, then vm is the array of the avalanche max velocities. The default is None.
+    num_runs : int, optional
+        The number of runs to use to estimate the histogram. The default is 10000.
+    dex : float, optional
+        The number of decades around which xmin* can be chosen from xmin and xmax* can be chosen from xmax.
+        That is, xmin* can be no smaller than 10**-dex times smaller than xmin. The default is 0.25.
+    ctr_max : int, optional
+        The number of attempts to make per run to find an appropriate regime. This should not be set much higher than 10. The default is 10.
+    min_events : int, optional
+        The minimum number of events an run must have to be counted in the bootstrapping. While this value can be set to be as little as 2,
+        'reasonable' estimates of the underlying histograms are found only when there is greater than 10 data. The default is 10.
+    stepsize : float, optional
+        If None, then assume durations are not discretized.
+        Otherwise, d is discrete and is parameterized in terms of stepsize, the timestep size.
+        That is, all of d should be (close to) multiples of stepsize.
+        Durations can be approximated as continuous if dmin > 30*(stepsize) or so. For most cases,
+        d_discrete should be True. The default is True.
+
+    Returns
+    -------
+    taus : float array
+        The estimated histogram of size exponent, tau.
+    alphas : float array
+        The estimated histogram of duration exponent, alpha.
+    mus : float array
+        If vm is given, then mus is the estimated histogram of the max velocity exponent, mu.
+    sdlhss : float array
+        The value of (tau-1)/(alpha-1) for each of the runs.
+    svlhss : float array
+        If vm is given, then svlhss is the value of (tau-1)/(mu-1) for each of the runs.
+    dvlhss : float array
+        If vm is given, then svlhss is the value of (alpha-1)/(mu-1) for each of the runs.
+    snzs : float array
+        The estimated histogram of the size versus duration exponent, snz. The expected exponent relationship is (tau-1)/(alpha-1) = snz.
+    sps : float array
+        If vm is given, then sps is the value of the size versus max velocity expoent, sp. The expected exponent relationship is (tau-1)/(mu-1) = sp
+    pnzs : float array
+        If vm is given, then pnzs is the value of the duration versus max velocity expoent, p/nz. The expected exponent relationship is (alpha-1)/(mu-1) = p/nz.
+
+    """
     #ctr_max is the max number of times to try reshuffling before skipping a particular run.
     taus = np.array([np.nan]*num_runs)
     alphas = np.array([np.nan]*num_runs)
@@ -257,14 +330,7 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.
         print("Not enough events. Returning.")
         return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
     
-    fun = find_pl #set fun to be the power_law() function
-    
-    #do the bootstrapping (serial). A bit slower than the original bootstrapping approach.
-    #for i in range(num_runs):
-    #    if i % 1000 == 0:
-    #        print(i)
-    #    taus[i],alphas[i],mus[i],sdlhss[i],svlhss[i],dvlhss[i],snzs[i],sps[i],pnzs[i] = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
-    vals = bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,fun,dex,ctr_max)
+    vals = bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,dex,ctr_max,stepsize)
     taus = vals[0,:]
     alphas = vals[1,:]
     mus = vals[2,:]
@@ -272,8 +338,8 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.
     svlhss = vals[4,:]
     dvlhss = vals[5,:]
     snzs = vals[6,:]
-    sps = vals[6,:]
-    pnzs = vals[7,:]
+    sps = vals[7,:]
+    pnzs = vals[8,:]
         
     return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
 
