@@ -39,6 +39,7 @@ from .likelihoods import find_pl, find_tpl, find_pl_discrete
 # Idea here is to solve ax = b, using least squares, where a represents our coefficients e.g. x**2, x, constants
 @numba.njit
 def _coeff_mat(x, deg):
+    #Set up the matrix of coefficients.
     mat_ = np.zeros(shape=(x.shape[0],deg + 1))
     const = np.ones_like(x)
     mat_[:,0] = const
@@ -56,6 +57,29 @@ def _fit_x(a, b):
  
 @numba.njit
 def fit_poly(x, y, deg):
+    """
+    A Numba safe version of a polynomial fitter.
+    
+    Source
+    https://gist.github.com/kadereub/9eae9cff356bb62cdbd672931e8e5ec4
+
+    Parameters
+    ----------
+    x : float array
+        The data on the x axis.
+    y : float array
+        The data on the y axis.
+    deg : int
+        The degree of the polynomial.
+
+    Returns
+    -------
+    coeffs : float array
+        The coefficients of the best fit from highest order to lowest order.
+        I.e. for Ax^2 + Bx + C, coeffs = [A, B, C].
+        
+
+    """
     a = _coeff_mat(x, deg)
     p = _fit_x(a, y)
     # Reverse order so p[0] is coefficient of highest order
@@ -67,6 +91,30 @@ def fit_poly(x, y, deg):
 #note that ensuring xmin > xmax makes the "random" value of xmax covariant with xmin.
 @numba.njit
 def logrand(xmin,xmax,dex):
+    """
+    Generate two random numbers, xmin* and xmax*, that are within dex orders of
+    magnitude of xmin and xmax respectively and are guaranteed to follow xmin* > xmax*.
+
+    Parameters
+    ----------
+    xmin : float
+        xmin* is generated within the range xmin*10**(-dex) and xmin*10**(dex)
+    xmax : float
+        xmax* is generated within the range xmax*10**(-dex) and xmax*10**(dex)
+        If xmin* > xmax*10**(-dex), then xmin* is used as the lower range for
+        xmax*
+    dex : float
+        The number of decades around which to generate xmin* and xmax* from xmin
+        and xmax.
+
+    Returns
+    -------
+    xmin* : float
+        The subsample xmin.
+    xmax* : float
+        The subsample xmax.
+
+    """
     #if dex is zero, xmin and xmax do not change.
     if dex == 0:
         return xmin,xmax
@@ -85,6 +133,30 @@ def logrand(xmin,xmax,dex):
 #find ymin and ymax from an interpolated function over logx,logy. Default to 50 log bins.
 @numba.njit
 def loginterp(x,y,xmin,xmax, bins = 50):
+    """
+    Find ymin and ymax from linearly interpolated function over log(x) and log(y).
+
+    Parameters
+    ----------
+    x : float array
+        The values on the x axis.
+    y : float array
+        The values on the y axis.
+    xmin : float
+        The float value to extrapolate ymin from.
+    xmax : float
+        The float value to extrapolate ymax from.
+    bins : int, optional
+        The number of logarithmic bins to place the data into. The default is 50.
+
+    Returns
+    -------
+    ymin : float
+        The extrapolated float value from xmin.
+    ymax : float
+        The extrapolated float value from xmax.
+
+    """
     bx,by,_ = logbinning(x,y,bins)
     
     logbx = np.log10(bx)
@@ -101,24 +173,18 @@ def loginterp(x,y,xmin,xmax, bins = 50):
     ymin = 10**logymin
     ymax = 10**logymax
     return ymin,ymax
-
-#using logbinned data to speed up calculations.
-def binned_interp(bx,myinterp,xmin,xmax):
-    logbx = np.log10(bx)
-    lo = max([np.log10(xmin),min(logbx)])
-    hi = min([np.log10(xmax),max(logbx)])
-    
-    logymin = myinterp(lo)
-    logymax = myinterp(hi)
-    
-    ymin = 10**logymin
-    ymax = 10**logymax
-    return ymin,ymax
     
 
 #bootstrapping core. From an input list of avalanche s,d,smin,smax,etc, estimate a single run of exponents.
 @numba.njit
 def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, dex, ctr_max, stepsize):
+    """
+    The bootstrapping core function. Given a set of s,d (and optionally vm),
+    generate a single bootstrapped sample of exponents.
+    
+    For more information, see the main bootstrap() function.
+
+    """
     #All of the logic of the bootstrapping is done here. For more complete documentation, see bootstrap().
     length = len(s)
     nums = 0
@@ -160,7 +226,6 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, de
         #if vmin and vmax are something other than 1, estimate vm statistics.
         if (vmin != 1)*(vmax != 1):
             vmin_star,vmax_star = logrand(vmin,vmax,dex) #get random vmin and vmax, ensuring vmax > vmin        
-            #vmin_star,vmax_star = binned_interp(sc,myinterp,smin_star,smax_star)
             
         nums = np.sum((sc >= smin_star)*(sc <= smax_star))
         numd = np.sum((dc >= dmin_star)*(dc <= dmax_star))
@@ -214,7 +279,11 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, de
 
 @numba.njit(parallel = True)
 def bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,dex,ctr_max,stepsize):
-    #The core of the bootstrapping code, isolated, so that njit acceleration + parallelization could be used.
+    """
+    Helper function for bootstrap which parallelizes the task over all available cores.
+    
+    Each core will run independent bootstrap_core() functions, then at the end combine them into arrays of each exponent's bootstrapped estimates.
+    """
     vals = np.zeros((num_runs,9))
     for i in numba.prange(num_runs):
         tmp = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,dex,ctr_max,stepsize)
@@ -234,7 +303,7 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.
     are within dex decades of the input smin/smax and dmin/dmax. Then, select a random
     subsample of avalanches with replacement from the s,d vectors. Then, fit tau, alpha, and
     snz from the subsample scaling s and scaling d (i.e. those within the smin*/smax* and
-    dmin*/dmax*). Optionally, thge scaling regime in vm is interpolated from the regime in s.
+    dmin*/dmax*). Optionally, the scaling regime in vm is interpolated from the regime in s.
     
     Returns 9 arrays of num_runs floats, one for each of the estimated exponents + relations.
     Each array of floats approximates the histogram underlying the distribution of each exponent.
@@ -419,6 +488,36 @@ def bca_core(theta_hat,theta_jk, bootstrap_estimates, alpha):
 #Returns the true value of the statistic and its lower and upper confidence intervals given output from bootstrap function.
 #Method validated against scipy.stats.bootstrap with BCa selected.
 def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95, stepsize = None):
+    """
+    Obtain the jackknife samples from a power law fit required to pass into
+    BCA core. For more details, see the bca_core function.
+
+    Parameters
+    ----------
+    x : float array
+        The data over which to obtain the jackknife samples.
+    xmin : float
+        The minimum of the scaling regime.
+    xmax : float
+        The maximum of the scaling regime.
+    bootstrap_estimates : float array
+        The distribution of bootstrap estimates for the given power law
+        from the bootstrap() function.
+    ci : float, optional
+        The confidence interval to return the BCA confidence intervals in. The default is 0.95.
+    stepsize : float, optional
+        If not None, then describes the step size between discrete data. The default is None.
+
+    Returns
+    -------
+    theta_hat : float
+        The mean value of the exponent.
+    theta_lo : float
+        The value of theta at the lower end of the BCA confidence interval.
+    theta_hi : float
+        The value of theta at the upper end of the BCA confidence interval.
+
+    """
     alpha = 1-ci #get alpha (e.g. confidence interval of 95% means alpha = 0.05)
     
     #compute the "true" value of theta
@@ -446,6 +545,45 @@ def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95, stepsize = None):
 
 #compute the BCA confidence intervals for combined statistics. i.e. like (tau-1)/(alpha-1)
 def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95, ystepsize = None):
+    """
+    Obtain the jackknife samples from the left-hand side of the exponent relationship
+    (i.e. (tau-1)/(alpha-1) for size and duration) required to pass into BCA core.
+    For more details, see the bca_core function.
+
+    Parameters
+    ----------
+    x : float array
+        The data over which the bootstrap samples from the top of the exponent ratio are obtained.
+        I.e. for (tau-1)/(alpha-1), x = sizes.
+    y : float array
+        The data over which the bootstrap samples from the bottom of the exponent ratio are obtained.
+        I.e. for (tau-1)/(alpha-1), y = durations.
+    xmin : float
+        The minimum of the x scaling regime.
+    xmax : float
+        The maximum of the x scaling regime.
+    ymin : float
+        The minimum of the y scaling regime.
+    ymax : float
+        The maximum of the y scaling regime.
+    bootstrap_estimates : float array
+        The bootstrap estimates of the exponent ratio, i.e. (tau-1)/(alpha-1),
+        generated from bootstrap().
+    ci : float, optional
+        The confidence interval over which to obtain the BCA confidence interval. The default is 0.95.
+    stepsize : float, optional
+        If not None, then describes the step size between discrete data in the y variable. The default is None.
+
+    Returns
+    -------
+    theta_hat : float
+        The mean value of the exponent.
+    theta_lo : float
+        The value of theta at the lower end of the BCA confidence interval.
+    theta_hi : float
+        The value of theta at the upper end of the BCA confidence interval.
+
+    """
     alpha = 1-ci
     
     xc = x[(x >= xmin)*(x <= xmax)]
@@ -492,6 +630,39 @@ def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95, ystepsize = 
 
 #Do BCa on fitted functions (i.e. like snz)
 def bca_fit(x,y,xmin,xmax,bootstrap_estimates,ci = 0.95):
+    """
+    Obtain the jackknife samples from the right-hand side of the exponent relationship
+    (i.e. snz for size and duration) required to pass into BCA core.
+    For more details, see the bca_core function.
+
+    Parameters
+    ----------
+    x : float array
+        The data on the x-axis of the fitted function relationship.
+        I.e. for snz, x = sizes.
+    y : float array
+        The data on the y-axis of the fitted function relationship.
+        I.e. for (tau-1)/(alpha-1), y = durations.
+    xmin : float
+        The minimum of the x scaling regime.
+    xmax : float
+        The maximum of the x scaling regime.
+    bootstrap_estimates : float array
+        The bootstrap estimates of the fited exponent, i.e. snz,
+        generated from bootstrap().
+    ci : float, optional
+        The confidence interval over which to obtain the BCA confidence interval. The default is 0.95.
+
+    Returns
+    -------
+    theta_hat : float
+        The mean value of the exponent.
+    theta_lo : float
+        The value of theta at the lower end of the BCA confidence interval.
+    theta_hi : float
+        The value of theta at the upper end of the BCA confidence interval.
+
+    """
     alpha = 1-ci
     
     
@@ -517,8 +688,47 @@ def bca_fit(x,y,xmin,xmax,bootstrap_estimates,ci = 0.95):
 #BCa to determine the exponent relationship confidence intervals, i.e. (tau-1)/(alpha-1) = snz
 #HOW TO USE: pass in bca_rel(s,d,smin,smax,dmin,dmax,lhss,snzs, ci = 0.95) to get bootstrapping.
 def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci = 0.95, ystepsize = None):
-    
-    from matplotlib import pyplot as plt
+    """
+    Obtain the jackknife samples required for the BCA confidence intervals on an exponent relationship,
+    i.e. (tau-1)/(alpha-1) - snz. For more details on the BCA algorithm, see bca_core.
+
+    Parameters
+    ----------
+    x : float array
+        The data on the x-axis of the fitted variable and on the top of the exponent ratio.
+        E.g. for (tau-1)/(alpha-1) - snz, x = (sizes)
+    y : float array
+        The data on the y-axis of the fitted variable and on the bottom of the exponent ratio.
+        E.g. for (tau-1)/(alpha-1) - snz, y = (durations)
+    xmin : float
+        The minimum of the x scaling regime.
+    xmax : float
+        The maximum of the x scaling regime.
+    ymin : float
+        The minimum of the y scaling regime.
+    ymax : float
+        The maximum of the y scaling regime.
+    bootstrap_estimates : float array
+        The bootstrap estimates of the exponent ratio, i.e. (tau-1)/(alpha-1),
+        generated from bootstrap().
+    bootstrap_estimates2 : float array
+        The bootstrap estimates of the fitted exponent values, i.e. snz,
+        generated from bootstrap().
+    ci : float, optional
+        The confidence interval over which to obtain the BCA confidence interval. The default is 0.95.
+    ystepsize : float, optional
+        If not None, then describes the step size between discrete data in the y variable. The default is None.
+
+    Returns
+    -------
+    theta_hat : float
+        The mean value of the exponent.
+    theta_lo : float
+        The value of theta at the lower end of the BCA confidence interval.
+    theta_hi : float
+        The value of theta at the upper end of the BCA confidence interval.
+
+    """
     alpha = 1 - ci
     
     xc = x[(x>= xmin)*(x <= xmax)]
@@ -588,7 +798,96 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
 
 #calculate the BCa confidence interval for a given type, given a set of bootstrap estimates from bootstrap().
 def bca(x,xmin,xmax, bootstrap_estimates, mytype = 'power_law', y = None, ymin = None, ymax = None, ci = 0.95, bootstrap_estimates2 = None, stepsize = None):
+    """
+    Generate the BCA confidence intervals given some bootstrap estimates.
+    That is, given the data used to generate the bootstrap estimates, this
+    function corrects for bias (median of bootstrap_estimates different from
+    from mean value) and acceleration (skewness). See bca_core for more
+    details on the BCA algorithm.
     
+    Sources
+    [1] Efron B. An Introduction to the Bootstrap (1993)
+
+    Parameters
+    ----------
+    x : float array
+        The data over which the bootstrap_estimates were generated.
+        For example, x is the array of sizes if bootstrap_estimates are the
+        histogram of taus from bootstrap().
+    xmin : float
+        The minimum of the scaling regmie of x.
+    xmax : float
+        The maximum of the scaling regime of x.
+    bootstrap_estimates : float array
+        The bootstrap estimates for the exponent obtained from bootstrap().
+    mytype : string, optional
+        Tells the BCA algorithm which which kind of BCA estimate to do.
+        
+        If 'power_law', then assumes that x (with scaling regime xmin <=x<=xmax)
+        is generated from find_pl or find_pl_discrete. Use this for tau, alpha, mu.
+        
+        If 'fit', then attempts to BCA the estimate of exponents obtained from
+        fits, i.e. snz for size versus duration, sp for size vs vmax, and p/nz
+        for duration vs vmax. Requires y (with scaling regime ymin/ymax) to be
+        inputted as the vector of data plotted against the y-axis when computing
+        the fit of the exponent. For example, y = durations and x = sizes when
+        calculating snz.
+        
+        If 'lhs', then uses BCA to find the estimate of the left-hand side of
+        exponent relationships, i.e. (tau-1)/(alpha-1). Requires x to be the
+        vector of data required to generate the top exponent and y to be the
+        vector of data required to generate the bottom exponent, i.e. x = sizes
+        and y = durations for (tau-1)/(alpha-1). Also requires
+        bootstrap_estimates to be set to the bootstrap estimates for the
+        exponent relationship from bootstrapping, i.e. (tau-1)/(alpha-1) output
+        from bootstrap().
+        
+        If 'rel', then estimates the confidence interval for a full exponent
+        relationship, i.e. (tau-1)/(alpha-1) - snz. Requires x to be set to the
+        vector of data used to estimate the top exponent in the exponent ratio.
+        Requires y to be set to the vector of data ued to estimate the bottom
+        exponent in the exponent ratio. Requires bootstrap_estimates to be
+        the left hand side from bootstrap(), i.e. (tau-1)/(alpha-1). Requires
+        bootstrap_estimates2 to be set to the  right hand side of the exponent
+        relationship, i.e. snz, obtained from bootstrap().
+    y : float array, opftional
+        If mytype == 'fit', then y is the data vector that represents the data
+        plotted on the y-axis when obtaining the fitted exponent, 
+        i.e. y = duration for snz.
+        
+        If mytype == 'lhs' or 'rel', then y is the data vector for the data on the bottom
+        of the left-hand side of the exponent relationship, i.e. for (tau-1)/(alpha-1),
+        y = duration.
+        
+        The default is None.
+    ymin : float, optional
+        The minimum of the scaling regime in y. The default is None.
+    ymax : float, optional
+        The maximum of the scaling regime in y. The default is None.
+    ci : float, optional
+        The confidence interval to report the BCA errorbars to (from 0 to 1).
+        The default is 0.95. (i.e. a 95% CI)
+    bootstrap_estimates2 : float array, optional
+        If mytype == 'rel', then this is the float array for the exponent on the 
+        right-hand side of the exponent relationship. For example, for
+        (tau-1)/(alpha-1) - snz, bootstrap_estimates2 = snzs, the bootstrap outputs
+        from bootstrap(). The default is None.
+    stepsize : float, optional
+        The size of the discrete variable step size. If None, then the variable is
+        assumed continuous. The default is None.
+        
+        Ex) Set stepsize = (timestep size) when fitting for alpha (when my_type == 'power_law' and x = durations)
+
+    Returns
+    -------
+    theta_hat : float
+        The mean value of the exponent.
+    theta_lo : float
+        The value of theta at the lower end of the BCA confidence interval.
+    theta_hi : float
+        The value of theta at the upper end of the BCA confidence interval.
+
+    """
     if mytype == 'power_law':
         return bca_pl(x,xmin,xmax,bootstrap_estimates, ci = ci, stepsize = stepsize)
     #for all options below this, y, ymin, and ymax must be given.
@@ -609,14 +908,99 @@ def bca(x,xmin,xmax, bootstrap_estimates, mytype = 'power_law', y = None, ymin =
     print('Error. Please input mytype == power_law, lhs, fit, or rel.')
     return 1,1,1
 
+#wrapper that returns the mean value + (1-alpha) confidence intervals for tau, alpha, (tau-1)/(alpha-1), snz, and (tau-1)/(alpha-1) - snz.
+def bootstrap_bca(s,d, smin, smax, dmin, dmax, num_runs = 10000, dex = 0.25, ctr_max = 10, min_events = 10, stepsize = None, bca_ci = 0.95, min_alpha = 1.00):
+    """
+    Wrapper that returns the mean value + (default 95% CI) bias corrected and accelerated
+    values of tau, alpha, snz, (tau-1)/(alpha-1), and (tau-1)/(alpha-1) - snz. By default,
+    considers only bootstrapping runs where alpha >= min_alpha.
 
+    Parameters
+    ----------
+    s : float array
+        The array of sizes
+    d : float array
+        The array of durations. If stepsize = None, assume the durations are continuous.
+    smin : float
+        The minimum of the scaling regime in size.
+    smax : float
+        The maximum of the scaling regime in size.
+    dmin : float
+        The minimum of the duration scaling regime.
+    dmax : float
+        The maximum of the duration scaling regime.
+    num_runs : int, optional
+        The number of bootstrapping runs to use to obtain the confidence intervals.
+        After some testing, it was found that 10k runs is enough to obtain 95% CI
+        up to the second decimal point of accuracy. The default is 10000.
+    dex : float, optional
+        The number of decades of scaling to randomly vary smin/smax and dmin/dmax over
+        when bootstrapping. The default is 0.25.
+    ctr_max : TYPE, optional
+        DESCRIPTION. The default is 10.
+    min_events : TYPE, optional
+        DESCRIPTION. The default is 10.
+    stepsize : TYPE, optional
+        DESCRIPTION. The default is None.
+    bca_ci : TYPE, optional
+        DESCRIPTION. The default is 0.95.
+    min_alpha : float, optional
+        The minimum value of alpha for 'valid' bootstrappiung runs. In most cases,
+        set this to 1, unless the bootstrap returns many alpha = 1 estimates which
+        skews the statistics. If you commonly get large values (i.e. >10) in the exponent 
+        relationship, set this to 1.01 (some small amount above 1). The default is 1.00.
 
-#get the (non-bca) confidence intervals from the array of bootstrapped values.
-#95% confidence interval is default. That is, 95% of values are going to be in range
-#(lo,hi)
-def confidence_intervals(vals,ci = 0.95):
-    ci = 100 - ci
-    mu = np.nanmedian(vals)
-    lo = np.nanpercentile(vals,ci/2)
-    hi = np.nanpercentile(vals,100-ci/2)
-    return mu, lo, hi
+    Returns
+    -------
+    taus : float array
+        The mean value of tau, followed by its values at the low and high ends of the confidence intervals.
+        [tau, tau_lo, tau_hi]
+    alphas : float array
+        The mean value of alpha, followed by its values at the low and high ends of the confidence intervals.
+        If alpha_lo < 1.1 or so, then there is a high chance of divergence in lhss or rels.
+        [alpha, alpha_lo, alpha_hi]
+    snzs : float array
+        The mean value of snz, followed by its values at the low and high ends of the confidence intervals.
+        [alpha, alpha_lo, alpha_hi]
+    lhss : float array
+        The mean value of (tau-1)/(alpha-1), followed by its values at the low and high ends of the confidence intervals.
+        If either lhs_lo or lhs_hi are unphysically high (i.e. greater than 10), then set min_alpha to be higher than 1.
+        For most cases, set min_alpha = 1.01 to remove from consideration the extremely unlikely runs which have alpha
+        close to 1 (causing an asymptote in (tau-1)/(alpha-1)).
+        [lhs, lhs_lo, lhs_hi]
+    rels : float array
+        The mean value of (tau-1)/(alpha-1) - snz, followed by its values at the low and high ends of the confidence intervals.
+        If either rel_lo or rel_hi are way too large, set min_alpha to be slightly greater than 1 (i.e. around 1.01) and try
+        again. If the problem persists, examine the shape of the histogram by running cc.bootstrap() and plotting the histogram.
+
+    """
+    
+    taus = np.zeros(3)
+    alphas = np.zeros(3)
+    lhss = np.zeros(3)
+    snzs = np.zeros(3)
+    rels = np.zeros(3)
+    
+    tmp = bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = num_runs, dex = dex, ctr_max = ctr_max, min_events = min_events, stepsize = stepsize)
+    taus_boot = tmp[0]
+    alphas_boot = tmp[1]
+    lhss_boot = tmp[3]
+    snzs_boot = tmp[4]
+    
+    #get [tau, tau_lo, and tau_hi]
+    taus = bca_pl(s,smin,smax, taus_boot[alphas_boot >= min_alpha], ci = bca_ci, stepsize = None)
+    
+    #get [alpha, alpha_lo, alpha_hi]
+    alphas = bca_pl(d,dmin,dmax, alphas_boot[alphas_boot >= min_alpha], ci = bca_ci, stepsize = stepsize)
+    
+    #get [snz, snz_lo, snz_hi]
+    snzs = bca_fit(s,d,smin,smax, snzs_boot[alphas_boot >= min_alpha], ci = bca_ci)
+    
+    #get [lhs, lhs_lo, lhs_hi]
+    lhss = bca_lhs(s,d,smin,smax,dmin,dmax,lhss_boot[alphas_boot >= min_alpha],ci = bca_ci,ystepsize=stepsize)
+    
+    #get [rel, rel_lo, rel_hi]
+    rels = bca_rel(s,d,smin,smax,dmin,dmax,lhss_boot[alphas_boot >= min_alpha],snzs_boot[alphas_boot >= min_alpha],ci=bca_ci,ystepsize = stepsize)
+    
+    
+    return taus, alphas, snzs, lhss, rels
