@@ -41,6 +41,7 @@ from .likelihoods import generate_test_data_with_xmax as generate_test_data
 #bootstrap (contains just bootstrap functions and all helpers)
 from .bootstrap import bootstrap as bootstrap
 from .bootstrap import bca
+from .bootstrap import bootstrap_bca
 
 #montecarlo (contains find_pl_montecarlo)
 from .montecarlo import find_pl_montecarlo as find_pl_montecarlo
