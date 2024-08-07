@@ -5,7 +5,7 @@ Created on Fri Jul  5 14:23:05 2024
 """
 import numba
 import numpy as np
-from .distances import find_d_sorted, find_ad_sorted, find_nearest_idx, find_d_sorted_discrete,find_nearest_idx_discrete
+from .distances import find_d_sorted, find_ad_sorted, find_nearest_idx, find_d_sorted_discrete,find_nearest_idx_discrete, find_ad_sorted_discrete
 from .brent import brent_findmin, brent_findmin_discrete
 from .likelihoods import pl_gen, pl_gen_discrete
 
@@ -183,7 +183,7 @@ def find_p_core_discrete(data,possible_xmins,possible_xmaxs, pruns, dfun):
     return possible_ps        
     
 #use a monte carlo approach of finding xmin, xmax, and alpha using AD statistic. Parallelization and njit() has improved speed to ~600 ms per star with these options.
-def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 100, dist_type = 'AD', calc_p = True):
+def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 100, dist_type = 'AD', calc_p = True, stepsize = None):
     """
     Find the best xmin and xmax for a power law scaling regime in data using a monte-carlo approach.
     The approach works by quantifying the KS (or AD) distance for many choices of xmin/xmax and
@@ -205,18 +205,24 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     Parameters
     ----------
     data : array
-        An array of data to search for xmin and xmax in. If using the 'discrete' option, must be normalized to the timestep dt before being input.
+        An array of data to search for xmin and xmax in. If stepsize is not None,
+        then the data are normalized with respect to the stepsize (i.e. d = 1 will be 1 timestep long)
     runs : int, optional
-        The number of monte-carlo runs to use to find the best xmin/xmax pair. A fake pq value is generated for each of these pairs of xmin/xmax. Good results are generally found with runs > 1000, but generally runs > 20000 is not needed. The default is 2000.
+        The number of monte-carlo runs to use to find the best xmin/xmax pair.
+        A fake pq value is generated for each of these pairs of xmin/xmax.
+        Good results are generally found with runs > 1000, but generally
+        runs > 20000 is not needed. The default is 2000.
     pqcrit : float, optional
-        The value of the 'fake' p value, pq, that the scaling regime between xmin/xmax must
-        be higher than to be considered possible. 0 < pqcrit < 1, and the higher pq is, the 
-        more strict the choice is at the cost of throwing out many usually very good runs.
-        Good performance is generally obtained with 0.2 < pqcrit < 0.5.
-        
+        The value of the 'fake' p value, pq, required to be considered a possible run.
         pqcrit is used as an initial sieve to initially throw out bad choices of xmin/xmax
         because calculating the 'true' p value is far more computationally costly and is
-        always less than pq. The default is 0.35.
+        always less than pq.
+        
+        Ranges from 0 < pqcrit < 1, and the higher pq is, the 
+        more strict the choice is at the cost of throwing out many usually very good runs.
+        Good performance is generally obtained with 0.2 < pqcrit < 0.5. The default is 0.35.
+        
+
     pcrit : float, optional
         The value of the 'true' p value that the scaling regime between xmin/xmax must be
         higher than to be considered possible. 0 < pcrit < 1, and higher is more strict
@@ -229,14 +235,17 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
         100. The default is 100.
     dist_type : string, optional
         The type of distribution to calculate the 'D' metric with. Use 'KS' for the 
-        Kolmogorov-Smirnov distance, 'AD' for the Anderson-Darling distance, and 'discrete'
-        for the discrete KS distance. AD distance is generally slightly better than KS, but
-        the computational cost is higher. However, KS distance performs mostly just as well
-        on test data. The 'discrete' case always uses the discrete KS distance. The default 
-        is 'AD'.
+        Kolmogorov-Smirnov distance, 'AD' for the Anderson-Darling distance. AD
+        distance is generally slightly better than KS, but the computational cost 
+        is higher. However, KS distance performs mostly just as well on test data.
+        
     calc_p : boolean, optional
         If True, calculates the p value. Otherwise, sets p threshold to the pq threshold, so
         p is not calculated in an effort to save time. The default is True.
+    
+    stepsize: float optional
+        If not None, assumes the data are discretized in units of stepsize. If None,
+        assumes the data are continuous. The default is None.
 
     Returns
     -------
@@ -249,6 +258,8 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     """
     
     data = np.sort(data) 
+    
+    #defaults to use when dist_type = KS and not discrete.
     dfun = find_d_sorted
     distfun = find_d_sorted
     brent = brent_findmin
@@ -260,27 +271,28 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     if calc_p == False:
         pcrit = pqcrit
         
-    if dist_type == 'KS':
-        distfun = find_d_sorted
-        dfun = find_d_sorted
-        brent = brent_findmin
-        nearest_first = find_nearest_idx
-        nearest_last = find_nearest_idx
-    elif dist_type == 'AD':
-        distfun = find_ad_sorted
-    elif dist_type == 'discrete':
+    #Sets the proper functions if dist_type = KS and is discrete.
+    if stepsize is not None:
+        data = np.rint(data/stepsize) #normalize the data to stepsize
         distfun = find_d_sorted_discrete
         dfun = find_d_sorted_discrete
-        brent = brent_findmin_discrete
         nearest_first = lambda x,val : find_nearest_idx_discrete(x,val,1)
         nearest_last = lambda x,val : find_nearest_idx_discrete(x,val,0)
+        brent = brent_findmin_discrete
         pfun = find_p_core_discrete
-        if np.any(data < 1):
-            print('Error. Please ensure data is discretized in terms of step size before using discrete option. Returning.')
-            return defaults
+
+        #Sets the dfun to be find_ad_sorted_discrete if dist_type = AD and is discrete.
+        if dist_type == 'AD':
+            distfun = find_ad_sorted_discrete   
+    #sets the functions if dist_type is AD and is not discrete
+    elif dist_type == 'AD':
+        distfun = find_ad_sorted
+    elif dist_type == 'KS':
+        distfun = find_d_sorted
     else:
-        print('Error. Please input a valid distance type (either KS, AD, or discrete)')
+        print('Error. Please input a valid distance type (either KS or AD)')
         return defaults
+
 
     #NOTE: due to a bug in numba (conditional statements don't work in for loops), we cannot compile this core function to njit.
     attempted_xmins = np.ones(runs)
@@ -387,6 +399,11 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 1
     xmin = possible_xmins2[minidx]
     xmax = possible_xmaxs2[minidx]
     alpha = possible_alphas2[minidx]
+
+    #If discrete, convert back to real data units.    
+    if stepsize is not None:
+        xmin = xmin*stepsize
+        xmax = xmax*stepsize
     
     #the "false" p-value from equation 29 of (https://doi.org/10.2478/s11600-013-0154-9).
     pq = possible_pqs2[minidx]
