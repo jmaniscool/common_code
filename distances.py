@@ -121,6 +121,65 @@ def find_d_sorted_discrete(normdata, alpha):
         cdf_t[i] = np.sum(sumrange**-alpha)*inv_bot
     return np.amax(np.abs(ecdf-cdf_t))
 
+@numba.njit
+def find_ad_sorted_discrete(normdata,alpha):
+    """
+    Find the AD distance for a discrete data, normdata, represented in units of its stepsize.    
+    Altered from the continuous case to remove integrals, based on Choulakian et al 1994
+    
+    Source
+    [1] Choulakian et al 1994, https://www.sfu.ca/~lockhart/Research/Papers/ChoulakianLockhartStephens.pdf
+
+    Parameters
+    ----------
+    normdata : array of ints
+        The data to compute KS distance for. Represented in units of stepsize, i.e. normdata = 1 for something that is one stepsize long.
+        The data is also sorted, with its first element being xmin, and its last element being xmax. Inclusive.
+    alpha : float
+        The alpha value to test against.
+
+    Returns
+    -------
+    float
+        The AD distance. Lower is better.
+
+    """
+    x = normdata
+    xmin = x[0]
+    xmax = x[-1]
+    
+    N = len(x)
+    if alpha <= 1:
+        return 1e12
+    
+    test_xmin = np.log10(xmin)*(-alpha+1)
+    if test_xmin > 100:
+        return 1e12
+    
+    #empirical cdf
+    vals,y = numba_unique(x)
+    y = np.cumsum(y)
+    ecdf = y/y[-1]
+    
+    #theoretical cdf + theoretical probability of obtaining each value
+    cdf_t = np.ones(len(vals))
+    inv_bot = 1/np.sum(np.arange(xmin,xmax+1)**-alpha)
+    p = np.ones(len(vals)) #p[i] holds the probability of obtaining vals[i]
+    for i in range(len(vals)):
+        sumrange = np.arange(xmin,vals[i] + 1)
+        cdf_t[i] = np.sum(sumrange**-alpha)*inv_bot
+        p[i] = inv_bot*(vals[i]**-alpha)
+        
+    #calculate the A2 value.
+    p = p[:-1] #Only the terms up until the last one are considered, since by definition the last term has a 0/0 discontinuity
+    cdf_t = cdf_t[:-1]
+    ecdf = ecdf[:-1]
+    
+    Z = (ecdf - cdf_t)*N #Zi = sum(o_i - e_i) (sum of observed minus expected)
+    A2 = (1/N)*Z*Z*p/(cdf_t*(1-cdf_t)) #Equation 3 in Choulakian et al 1994
+    
+    return np.sum(A2) #the last term gives nan because cdf_t = 0 at x = xmax.
+
 #ASSUME DATA IS SORTED AND DATA[0] = XMIN AND DATA[-1] = XMAX
 #use PowerLaw D which is weighted to be more sensitive towards tails. Not as performant, but could be bugged.
 def find_dstar_sorted(data, alpha):
