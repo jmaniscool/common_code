@@ -7,6 +7,29 @@ Created on Fri Jul  5 13:55:22 2024
 
 #Add all defunct functions that are not in use any more.
 
+#get the (non-bca) confidence intervals from the array of bootstrapped values.
+#95% confidence interval is default. That is, 95% of values are going to be in range
+#(lo,hi)
+def confidence_intervals(vals,ci = 0.95):
+    ci = 100 - ci
+    mu = np.nanmedian(vals)
+    lo = np.nanpercentile(vals,ci/2)
+    hi = np.nanpercentile(vals,100-ci/2)
+    return mu, lo, hi
+
+#using logbinned data to speed up calculations.
+def binned_interp(bx,myinterp,xmin,xmax):
+    logbx = np.log10(bx)
+    lo = max([np.log10(xmin),min(logbx)])
+    hi = min([np.log10(xmax),max(logbx)])
+    
+    logymin = myinterp(lo)
+    logymax = myinterp(hi)
+    
+    ymin = 10**logymin
+    ymax = 10**logymax
+    return ymin,ymax
+
 #find the power law index "exactly" using the zero of the derivative of the log likelihood function.
 #Works more quickly and over a broader range than scipy.minimize version.
 #ASSUME X IS SORTED AND IT GOES FROM XMIN TO XMAX INCLUSIVE
