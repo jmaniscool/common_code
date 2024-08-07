@@ -80,10 +80,18 @@ def fit_poly(x, y, deg):
         
 
     """
-    a = _coeff_mat(x, deg)
-    p = _fit_x(a, y)
+    a = np.zeros(shape=(x.shape[0],deg + 1))
+    const = np.ones_like(x)
+    a[:,0] = const
+    a[:, 1] = x
+    if deg > 1:
+        for n in range(2, deg + 1):
+            a[:, n] = x**n
+            
+    p = np.linalg.lstsq(a, y)[0]
     # Reverse order so p[0] is coefficient of highest order
     return p[::-1]
+
 
 
 
@@ -985,7 +993,7 @@ def bootstrap_bca(s,d, smin, smax, dmin, dmax, num_runs = 10000, dex = 0.25, ctr
     taus_boot = tmp[0]
     alphas_boot = tmp[1]
     lhss_boot = tmp[3]
-    snzs_boot = tmp[4]
+    snzs_boot = tmp[6]
     
     #get [tau, tau_lo, and tau_hi]
     taus = bca_pl(s,smin,smax, taus_boot[alphas_boot >= min_alpha], ci = bca_ci, stepsize = None)
