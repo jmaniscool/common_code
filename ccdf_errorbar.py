@@ -36,10 +36,13 @@ from scipy.special import betainc
 from scipy.optimize import minimize
 from scipy.optimize import root_scalar
 import scipy
+from .get_ccdf_arr import ccdf as ccdf
 
 
 #Errorbar handling wrapper. Returns relative errorbar around each point. Default to pointwise.
-def ccdf_errorbar(histy, ci = 0.95, method = 'pointwise'):
+def ccdf_errorbar(data, ci = 0.95, method = 'pointwise'):
+    cx,cy = ccdf(data)
+    datalen = len(data)
     if method == "simultaneous":
         fun = simultaneous_errorbars
     elif method == "pointwise":
@@ -49,22 +52,22 @@ def ccdf_errorbar(histy, ci = 0.95, method = 'pointwise'):
     else:
         print("ERROR: Nethod must be either simultaneous, pointwise, or nir. Returning.")
         return np.array([-1]), np.array([-1])            
-    return fun(histy, ci)
+    return fun(cy, ci, datalen)
 
 #Calculates the frequentist Clopper-Pearson pointwise confidence band of the CCDF.
 #Use when figuring the dispersion each point may have individually from
 #the true CCDF and for collapses.
-def pointwise_errorbars(histy, ci = 0.95):    
+def pointwise_errorbars(histy, ci, datalen):    
     ci_bot = (1 - ci)/2
     ci_top = (1 + ci)/2
     
-    N = len(histy)
+    N = datalen #fix so the data length is appropriately accounted for.
     
     num_successes = (1-histy)*N #Convert from CCDF to number of trials less than (or equal to if using scipy option) current number.
     
-    errs_top = np.zeros(N)
-    errs_bot = np.zeros(N)
-    for i in range(N):
+    errs_top = np.zeros(len(histy))
+    errs_bot = np.zeros(len(histy))
+    for i in range(len(histy)):
         n = num_successes[i]
         
         #if n = 0 or N, give the exact solutions.
@@ -105,9 +108,10 @@ def beta_hi_pearson(x,N,n_success,err):
 #calculate the simultaneous CCDF error bars. Use when estimating the possible
 #dispersion the empirical CCDF may have from the true CCDF 95% of the time.
 #This can be useful when fitting to an expected distribution, i.e. if you are trying to prove that a distribution could be pulled from a power law of particular exponent.
-def simultaneous_errorbars(histy, ci = 0.95):
+def simultaneous_errorbars(histy, ci, datalen):
     alpha = 1-ci
-    epsilon = np.sqrt(np.log(2/alpha)/(2*len(histy)))
+    N = datalen
+    epsilon = np.sqrt(np.log(2/alpha)/(2*N))
 
     #absolute errorbars
     """
@@ -127,10 +131,10 @@ def simultaneous_errorbars(histy, ci = 0.95):
 
 
 #Jordan version of Nir's Bayesian pointwise errorbar approach. Use ci = 0.95 to get 95% CI.
-def nir_errorbars(histy, ci = 0.95):
+def nir_errorbars(histy, ci, datalen):
 
     histy = np.array(histy)
-    N = len(histy)
+    N = datalen
     errs_top = np.zeros(N)
     errs_bot = np.zeros(N)
     ci_bot = (1 - ci)/2
