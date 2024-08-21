@@ -261,9 +261,9 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, de
     #find tau and alpha
     tau = find_pl(scc,smin_star,smax_star)[0]
     if stepsize is None:
-        alpha = find_pl(dcc,dmin_star,dmax_star)[0]
+        alpha = find_pl(dc,dmin_star,dmax_star)[0]
     else:
-        alpha = find_pl_discrete(dcc, dmin_star,dmax_star,stepsize)[0]
+        alpha = find_pl_discrete(dc, dmin_star,dmax_star,stepsize)[0] #fix bug whereby double rounding occurs if one uses find_pl_discrete on data that has already been truncated.
     
     #find snz and (tau-1)/(alpha-1)
     #snz = scipy.stats.linregress(logscc,logdcc).slope
@@ -539,9 +539,15 @@ def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95, stepsize = None):
     theta_jk = np.zeros(numdat)
     f = find_pl
     if stepsize is not None:
-        f = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,stepsize)
+        #NOTE: when calculating the true value of theta, when the variable is discrete, it must be discretized before inputting into find_pl_discrete.
+        x = np.rint(x/stepsize)
+        xmin = np.rint(xmin/stepsize)
+        xmax = np.rint(xmax/stepsize)
+        xc = x[(x >= xmin)*(x <= xmax)]
+        f = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,1) #normalize the data before calculating theta_hat
 
     theta_hat = f(xc,xmin,xmax)[0]
+    
     
     #Jackknife estimation of acceleration (from Scipy)
     theta_jk = np.zeros(numdat)
@@ -608,7 +614,10 @@ def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95, ystepsize = 
     fx = find_pl
     fy = find_pl
     if ystepsize is not None:
-        fy = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,ystepsize)
+        yc = np.rint(y/ystepsize)
+        ymin = np.rint(ymin/ystepsize)
+        ymax = np.rint(ymax/ystepsize)
+        fy = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,1)
     
     thetax_hat = fx(xc,xmin,xmax)[0]
     thetay_hat = fy(yc,ymin,ymax)[0]
@@ -632,6 +641,7 @@ def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95, ystepsize = 
     thetay_jk = np.zeros(ny)
     for i in range(ny):
         thetay_jk[i] = fy(np.delete(yc,i),ymin,ymax)[0]   
+    
     #get the total jackknife as an nx*ny array (i.e. removing each of xi and yi then kron-ing them together and flattening)
     theta_jk = np.zeros(nx*ny)
     for i in range(nx):
@@ -754,11 +764,19 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
     xc = x[(x>= xmin)*(x <= xmax)]
     yc = y[(y >= ymin)*(y <= ymax)]
     
+    normy = y
+    normymin = ymin
+    normymax = ymax
+    
     fx = find_pl
     fy = find_pl
     
     if ystepsize is not None:
-        fy = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,ystepsize)
+        normy = np.rint(y/ystepsize)
+        normymin = np.rint(ymin/ystepsize)
+        normymax = np.rint(ymax/ystepsize)
+        fy = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,1)
+        thetay_hat = fy(normy,normymin,normymax)
         
     #edge case: if the bootstrap estimates are all nan, return zeros
     if np.all(np.isnan(bootstrap_estimates)) + np.all(np.isnan(bootstrap_estimates2)):
@@ -769,7 +787,7 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
 
     fit_hat = fit_poly(logxc,logyc,1)[0]
     thetax_hat = fx(xc,xmin,xmax)[0]
-    thetay_hat = fy(yc,ymin,ymax)[0]
+    thetay_hat = fy(normy,normymin,normymax)[0] #calculates find_pl on continuous data if ystepsize is not None, otherwise calculates find_pl_discrete on discretized data.
     if thetay_hat == 1:
         thetay_hat = np.nan
     
@@ -802,7 +820,7 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
     #jackknife over thetay
     thetay_jk = np.zeros(ny)
     for i in range(ny):
-        thetay_jk[i] = fy(np.delete(yc,i),ymin,ymax)[0]
+        thetay_jk[i] = fy(np.delete(normy,i),normymin,normymax)[0]
         if thetay_jk[i] == 1:
             thetay_jk[i] = np.nan
                 
