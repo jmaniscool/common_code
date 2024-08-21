@@ -183,7 +183,7 @@ def find_p_core_discrete(data,possible_xmins,possible_xmaxs, pruns, dfun):
     return possible_ps        
     
 #use a monte carlo approach of finding xmin, xmax, and alpha using AD statistic. Parallelization and njit() has improved speed to ~600 ms per star with these options.
-def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.35, pcrit = 0.25, pruns = 100, dist_type = 'AD', calc_p = True, stepsize = None):
+def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.45, pcrit = 0.35, pruns = 100, dist_type = 'AD', calc_p = True, stepsize = None):
     """
     Find the best xmin and xmax for a power law scaling regime in data using a monte-carlo approach.
     The approach works by quantifying the KS (or AD) distance for many choices of xmin/xmax and
