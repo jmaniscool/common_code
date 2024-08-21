@@ -528,6 +528,10 @@ def bca_pl(x, xmin,xmax, bootstrap_estimates, ci = 0.95, stepsize = None):
     """
     alpha = 1-ci #get alpha (e.g. confidence interval of 95% means alpha = 0.05)
     
+    #edge case: if the bootstrap estimates are all nan, return zeros
+    if np.all(np.isnan(bootstrap_estimates)):
+        return 0,0,0
+    
     #compute the "true" value of theta
     xc = x[(x >= xmin)*(x <= xmax)]
     numdat = len(xc)
@@ -596,6 +600,10 @@ def bca_lhs(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates, ci = 0.95, ystepsize = 
     
     xc = x[(x >= xmin)*(x <= xmax)]
     yc = y[(y >= ymin)*(y <= ymax)]
+    
+    #edge case: if the bootstrap estimates are all nan, return zeros
+    if np.all(np.isnan(bootstrap_estimates)):
+        return 0,0,0
     
     fx = find_pl
     fy = find_pl
@@ -679,6 +687,10 @@ def bca_fit(x,y,xmin,xmax,bootstrap_estimates,ci = 0.95):
     
     logxc = np.log10(xc)
     logyc = np.log10(yc)
+    
+    #edge case: if the bootstrap estimates are all nan, return zeros
+    if np.all(np.isnan(bootstrap_estimates)):
+        return 0,0,0
 
     theta_hat = fit_poly(logxc,logyc,1)[0] #replace with jit-able version in case I need the speedup later.
     
@@ -747,6 +759,10 @@ def bca_rel(x,y,xmin,xmax,ymin,ymax,bootstrap_estimates,bootstrap_estimates2, ci
     
     if ystepsize is not None:
         fy = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax,ystepsize)
+        
+    #edge case: if the bootstrap estimates are all nan, return zeros
+    if np.all(np.isnan(bootstrap_estimates)) + np.all(np.isnan(bootstrap_estimates2)):
+        return 0,0,0
         
     logxc = np.log10(xc)
     logyc = np.log10(y[(x >= xmin)*(x <= xmax)])
