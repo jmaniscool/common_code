@@ -98,7 +98,7 @@ def fit_poly(x, y, deg):
 #get a new random xmin_star and xmax_star which varies over -dex to dex in log scale and ensures xmin < xmax.
 #note that ensuring xmin > xmax makes the "random" value of xmax covariant with xmin.
 @numba.njit
-def logrand(xmin,xmax,dex):
+def logrand(xmin,xmax,dex_lo, dex_hi):
     """
     Generate two random numbers, xmin* and xmax*, that are within dex orders of
     magnitude of xmin and xmax respectively and are guaranteed to follow xmin* > xmax*.
@@ -124,14 +124,16 @@ def logrand(xmin,xmax,dex):
 
     """
     #if dex is zero, xmin and xmax do not change.
-    if dex == 0:
-        return xmin,xmax
     logxmin = np.log10(xmin)
     logxmax = np.log10(xmax)
     
-    logxmin_star = np.random.uniform(-dex + logxmin, dex + logxmin) #get log(xmin) to vary between -dex and +dex
-    #ensure smax > smin while keeping sampling uniform
-    logxmax_star = np.random.uniform(max([-dex + logxmax, logxmin_star]), dex + logxmax) #log(xmax_star) varies between -dex and dex if logxmin_star < -dex + logsmax_star, otherwise log(xmax_star) varies between logxmin_star and +dex
+    logxmin_star = logxmin
+    logxmax_star = logxmax
+    
+    if dex_lo > 0:
+        logxmin_star = np.random.uniform(-dex_lo + logxmin, dex_lo + logxmin) #get log(xmin) to vary between -dex and +dex
+    if dex_hi > 0:
+        logxmax_star = np.random.uniform(max([-dex_hi + logxmax, logxmin_star]), dex_hi + logxmax) #log(xmax_star) varies between -dex and dex if logxmin_star < -dex + logsmax_star, otherwise log(xmax_star) varies between logxmin_star and +dex
     
     xmin_star = 10**logxmin_star
     xmax_star = 10**logxmax_star
@@ -185,7 +187,7 @@ def loginterp(x,y,xmin,xmax, bins = 50):
 
 #bootstrapping core. From an input list of avalanche s,d,smin,smax,etc, estimate a single run of exponents.
 @numba.njit
-def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, dex, ctr_max, stepsize):
+def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, sdex_lo, sdex_hi, ddex_lo, ddex_hi, ctr_max, stepsize):
     """
     The bootstrapping core function. Given a set of s,d (and optionally vm),
     generate a single bootstrapped sample of exponents.
@@ -221,8 +223,8 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, de
     #try to get enough events to bootstrap over (at least 10.)
     while (ctr <= ctr_max)*((nums < 10) + (numd < 10) + (numv < 10)):    
         idxs = np.random.randint(0,length,length) #get indexes of avalanches to sample
-        smin_star,smax_star = logrand(smin,smax,dex) #get random smin and smax, ensuring smax > smin    
-        dmin_star,dmax_star = logrand(dmin,dmax,dex) #get random dmin and dmax, ensuring dmax > dmin
+        smin_star,smax_star = logrand(smin,smax,sdex_lo, sdex_hi) #get random smin and smax, ensuring smax > smin    
+        dmin_star,dmax_star = logrand(dmin,dmax,ddex_lo, ddex_hi) #get random dmin and dmax, ensuring dmax > dmin
         
         sc = s[idxs] #get list of sampled avalanche size, duration, velocity and their logs
         dc = d[idxs]
@@ -233,7 +235,7 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, de
         
         #if vmin and vmax are something other than 1, estimate vm statistics.
         if (vmin != 1)*(vmax != 1):
-            vmin_star,vmax_star = logrand(vmin,vmax,dex) #get random vmin and vmax, ensuring vmax > vmin        
+            vmin_star,vmax_star = logrand(vmin,vmax,sdex_lo, sdex_hi) #get random vmin and vmax, ensuring vmax > vmin        
             
         nums = np.sum((sc >= smin_star)*(sc <= smax_star))
         numd = np.sum((dc >= dmin_star)*(dc <= dmax_star))
@@ -286,7 +288,7 @@ def bootstrap_core(s,d,smin, smax, dmin, dmax,vm, vmin, vmax,logs,logd,logvm, de
     return tau,alpha,mu, sdlhs,svlhs,dvlhs, snz,sp,pnz
 
 @numba.njit(parallel = True)
-def bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,dex,ctr_max,stepsize):
+def bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,sdex_lo, sdex_hi, ddex_lo, ddex_hi ,ctr_max,stepsize):
     """
     Helper function for bootstrap which parallelizes the task over all available cores.
     
@@ -294,13 +296,13 @@ def bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,
     """
     vals = np.zeros((num_runs,9))
     for i in numba.prange(num_runs):
-        tmp = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,dex,ctr_max,stepsize)
+        tmp = bootstrap_core(s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,sdex_lo, sdex_hi, ddex_lo, ddex_hi,ctr_max,stepsize)
         vals[i] = tmp
     
     return vals.transpose()
 
 #v2 of bootstrap, updated Feb 27, 2024. Written to take advantage of various programming fundamentals improvements Jordan learned since the original bootstrap was written
-def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.25, ctr_max = 10, min_events = 10, stepsize = None):
+def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, sdex_lo = 0.25, sdex_hi = 0.25, ddex_lo = 0.25, ddex_hi = 0.25, ctr_max = 10, min_events = 10, stepsize = None):
     """
     Generate distributions of exponents that can be used to estimate the confidence interval.
     For each avalanche, the size s, durations d, (and optionally max velocity vm) are inputs.
@@ -334,9 +336,16 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.
         If not None, then vm is the array of the avalanche max velocities. The default is None.
     num_runs : int, optional
         The number of runs to use to estimate the histogram. The default is 10000.
-    dex : float, optional
-        The number of decades around which xmin* can be chosen from xmin and xmax* can be chosen from xmax.
-        That is, xmin* can be no smaller than 10**-dex times smaller than xmin. The default is 0.25.
+    sdex_lo : float, optional
+        The number of decades around which smin* can be chosen from smin.
+        That is, smin* can be no smaller than 10**-dex_lo times smaller than smin. The default is 0.25.
+    sdex_hi : float, optional
+        The number of decades around which dmax* can be chosen from around dmax.
+        The default is 0.25.        
+    ddex_lo : float, optional
+        The number of decades around which dmin* can be chosen from dmin. The default is 0.25.
+    ddex_hi : float, optional
+        The number of decades around which dmax* can be chosen from around dmax. The default is 0.25.
     ctr_max : int, optional
         The number of attempts to make per run to find an appropriate regime. This should not be set much higher than 10. The default is 10.
     min_events : int, optional
@@ -407,7 +416,7 @@ def bootstrap(s,d, smin, smax, dmin, dmax, vm = None, num_runs = 10000, dex = 0.
         print("Not enough events. Returning.")
         return taus,alphas,mus, sdlhss,svlhss,dvlhss, snzs,sps,pnzs
     
-    vals = bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,dex,ctr_max,stepsize)
+    vals = bootstrap_parallel(num_runs,s,d, smin,smax,dmin,dmax,vm,vmin,vmax,logs,logd,logvm,sdex_lo, sdex_hi, ddex_lo, ddex_hi,ctr_max,stepsize)
     taus = vals[0,:]
     alphas = vals[1,:]
     mus = vals[2,:]
