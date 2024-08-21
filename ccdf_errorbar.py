@@ -41,6 +41,59 @@ from .get_ccdf_arr import ccdf as ccdf
 
 #Errorbar handling wrapper. Returns relative errorbar around each point. Default to pointwise.
 def ccdf_errorbar(data, ci = 0.95, method = 'pointwise'):
+    """
+    CCDF errorbar wrapper. Returns the y error of the CCDF, [lo, hi] which are the
+    (100*ci)-percentile confidence intervals at the bottom and top respectively.
+    That is, for cx,cy = cc.ccdf(data), the (100*ci)% confidence interval extends
+    from cy - lo to cy + hi.
+    
+    This function calculates three types of confidence intervals, explained briefly below.
+    Generally, prefer to use the simultaneous approach since that models the shape of the
+    underlying CCDF rather than the dispersion that each individual point can obey.
+    
+    'simultaneous':
+        The Dvoretzky–Kiefer–Wolfowitz inequality (DKW) upper bound confidence interval
+        on the shape of the CCDF. In other words, if N synthetic datasets are generated
+        via bootstrapping on the data, ci*N runs will have shapes within thes DKW
+        intervals. The DKW confidence interval is symmetric about the CCDF. This should
+        be used when estimating the shape of the CCDF (i.e. when calculating the scaling
+        regime xmin/xmax via monte carlo.).
+    
+    'pointwise':
+        The frequentist Clopper-Pearson confidence bands which can be asymmetric and
+        are calculated using the root of a beta function. Calculates the range over
+        which each individual data point can vary from the empirical distribution
+        function. That is, e.g. 5% of the time the empirical CDF will lie outside
+        of this range for each data point. Or, more roughly, 5% of the data will lie
+        outside of this range on each synthetic run. For more information, see
+        https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval
+        
+    'nir':
+        The Bayesian pointwise confidence bands which can be asymmetric and are
+        calculated using the root of a beta function. The only significant difference
+        between this and the pointwise approach is the fact that the pointwise
+        approach is calculated from a frequentist approach whereas this is calculated
+        using a Bayesian approach (leading to small indexing differences). For more
+        information, see Nir Friedman's thesis.
+
+    Parameters
+    ----------
+    data : float array
+        The data to calculate the CCDF errorbar around.
+    ci : float, optional
+        The confidence interval to return, 0 < ci < 1. The default is 0.95 for 95% CI.
+    method : string, optional
+        The type of confidence interval to calculate.
+        The default is 'pointwise'.
+
+    Returns
+    -------
+    bot: float
+        The lower confidence interval, cy - lo.
+    top: float
+        The upper confidence interval, cy + hi
+
+    """
     cx,cy = ccdf(data)
     datalen = len(data)
     if method == "simultaneous":
@@ -54,10 +107,35 @@ def ccdf_errorbar(data, ci = 0.95, method = 'pointwise'):
         return np.array([-1]), np.array([-1])            
     return fun(cy, ci, datalen)
 
-#Calculates the frequentist Clopper-Pearson pointwise confidence band of the CCDF.
+#Calculates the frequentist Clopper-Pearson pointwise confidence band for eacof the CCDF.
 #Use when figuring the dispersion each point may have individually from
 #the true CCDF and for collapses.
-def pointwise_errorbars(histy, ci, datalen):    
+def pointwise_errorbars(histy, ci, datalen):
+    """
+    Calculates the frequentist Clopper-Pearson pointwise confidence band for each
+    datapoint in the CCDF. Use when the dispersion of the data away from the
+    empirical distribution function should be known -- this is a niche use case
+    and should be avoided, noting that (100*(1-ci))% of the time the data will lie
+    outside of this bound in synthetic datasets.
+
+    Parameters
+    ----------
+    histy : float array
+        The y values of the CCDF, the output of the ccdf() function.
+    ci : float
+        The confidence interval to calculate the error bars over.
+    datalen : int
+        The length of the data. len(histy) != datalen because there is a non-zero
+        chance of overlaps in all data.
+
+    Returns
+    -------
+    bot: float
+        The lower confidence interval, cy - lo.
+    top: float
+        The upper confidence interval, cy + hi
+
+    """
     ci_bot = (1 - ci)/2
     ci_top = (1 + ci)/2
     
@@ -109,17 +187,32 @@ def beta_hi_pearson(x,N,n_success,err):
 #dispersion the empirical CCDF may have from the true CCDF 95% of the time.
 #This can be useful when fitting to an expected distribution, i.e. if you are trying to prove that a distribution could be pulled from a power law of particular exponent.
 def simultaneous_errorbars(histy, ci, datalen):
+    """
+    Calculates the symmetric DKW errorbars. This should be preferred when calculating
+    properties related to the shape of the distribution, i.e. obtaining xmin/xmax,
+    obtaining the underlying exponent value.
+
+    Parameters
+    ----------
+    histy : float array
+        The y values of the CCDF, the output of the ccdf() function.
+    ci : float
+        The confidence interval to calculate the error bars over.
+    datalen : int
+        The length of the data. len(histy) != datalen because there is a non-zero
+        chance of overlaps in all data.
+
+    Returns
+    -------
+    bot: float
+        The lower confidence interval, cy - lo.
+    top: float
+        The upper confidence interval, cy + hi
+
+    """
     alpha = 1-ci
     N = datalen
     epsilon = np.sqrt(np.log(2/alpha)/(2*N))
-
-    #absolute errorbars
-    """
-    errs_top = histy + epsilon
-    errs_bot = histy - epsilon    
-    errs_top[errs_top > 1] = 1
-    errs_bot[errs_bot < 0] = 0
-    """
     
     #relative errorbars
     errs_top = epsilon*np.ones(len(histy))
