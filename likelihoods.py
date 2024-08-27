@@ -490,7 +490,7 @@ Variables:
         An array of two strings, telling which two distributions will be tested against one another.
 
 """
-def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
+def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential'], stepsize = None):
     #check if inputs for distributions are legal
     legal = ['power_law','exponential','lognormal','truncated_power_law']
     if not hasattr(totest, '__iter__'):
@@ -525,12 +525,23 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
     llrfuns = [None]*2
     opts = [None]*2
     dists = [None]*2
-    x = x[(x >= xmin)*(x <= xmax)]
+    
+    #do the llr comparison against variable 'normx' which will hold the x values normalized against stepsize if stepsize is not none.
+    normx = x
+    normxmin = xmin
+    normxmax = xmax
+    if stepsize is not None:
+        normx = np.rint(x/stepsize)
+        normxmin = np.rint(xmin/stepsize)
+        normxmax = np.rint(xmax/stepsize)
     for i in range(len(totest)):
         if totest[i] == 'power_law':
             #print('pl')
             findfuns[i] = find_pl
             llrfuns[i] = pl_like
+            if stepsize is not None:
+                findfuns[i] = lambda x,xmin,xmax : find_pl_discrete(x,xmin,xmax, stepsize = stepsize)
+                llrfuns[i] = pl_like_discrete
         if totest[i] == 'truncated_power_law':
             #print('tpl')
             findfuns[i] = find_tpl
@@ -543,8 +554,11 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential']):
             #print('ln')
             findfuns[i] = find_lognormal
             llrfuns[i] = lognormal_like
-        opts[i] = findfuns[i](x,xmin,xmax)[:-1]
-        dists[i] = llrfuns[i](x,xmin,xmax,*opts[i])[-1]
+            
+        opts[i] = findfuns[i](normx,normxmin,normxmax)[:-1] #in the case that we are testing against a discrete power law, always calculate the optimal value using find_pl_discrete on un-normalized data to avoid double-rounding error.
+        if totest[i] == 'power_law':
+            opts[i] = findfuns[i](x,xmin,xmax)[:-1] #in the case that we are testing against a discrete power law, always calculate the optimal value using find_pl_discrete on un-normalized data to avoid double-rounding error.
+        dists[i] = llrfuns[i](normx,normxmin,normxmax,*opts[i])[-1]
 
     #print(dists)
     #now that the dist lists are populated, get the optimal values using MLE
