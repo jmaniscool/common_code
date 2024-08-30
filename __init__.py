@@ -1,5 +1,6 @@
 
 from .get_slips import get_slips_wrap as gs
+from .get_slips import get_slips_vel as gsv #get_slips to use if you have a velocity signal and you want to guarantee no negative sizes.
 from .fit import fit as fit
 from .shapes import shapes
 from .weinerfilter import weinerfilter_wrap as weinerfilter

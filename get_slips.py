@@ -346,3 +346,95 @@ def get_slips_core(smoothed, deriv, time, threshhold, mindrop, shapes, is_integr
         return [list(velocity), list(times), list(slip_sizes),list(slip_durations),list(index_av_begins), list(index_av_ends)]
     else:
         return [list(slip_sizes),list(slip_durations),list(index_begins), list(index_ends)]
+    
+    
+#use the trapezoidal rule + chopping off all parts of the signal less than the threshold (i.e. velocity < threshold*std(data) or whatever) to get a more accurate view of the size of an event.
+def get_slips_vel(time, velocity, drops = True, threshold = 0, mindrop = 0, threshtype = 'median', window_size = 101):
+
+    trapz = scipy.integrate.trapezoid
+    std = lambda x : 1.4826*mad(x)    
+    if threshtype == 'median':
+        avg = np.median
+    if threshtype == 'mean':
+        avg = np.mean
+        std = np.std
+    cutoff_velocity = (avg(velocity) + std(velocity)*threshold*(int(threshold != -1)))*np.ones(len(velocity))
+    if threshtype == 'sliding_median':
+        cutoff_velocity = sliding_median(velocity, window_size, mode = 'nearest')
+        cutoff_velocity[:window_size//2] = cutoff_velocity[window_size//2]
+        cutoff_velocity[-window_size//2:] = cutoff_velocity[-window_size//2]
+        cutoff_velocity = cutoff_velocity + std(velocity)*threshold*(int*threshold != -1)
+        
+    
+    #treat the velocity by removing the trend such that its centered around zero
+    deriv = velocity - cutoff_velocity
+    if drops == True:
+        deriv = -velocity
+
+    #search for rises in the deriv curve
+    
+    #set all parts of the curve with velocity less than zero to be equal to zero
+    deriv[deriv < 0] = 0
+    
+    #get the slips
+    slips = np.append(0,np.diff(1*(deriv > 0)))
+    index_begins = np.where(slips == 1)[0] #velocity start index (first index above 0)
+    index_ends = np.where(slips == -1)[0]  #velocity end index (last index above 0)
+    
+    if index_begins.size == 0:
+        index_begins = np.array([0])
+    if index_ends.size == 0:
+        index_ends = np.array([len(time)-1])
+    if index_begins[-1] >= index_ends[-1]:
+        index_ends = np.append(index_ends, len(time) - 1)
+    if index_begins[0] >= index_ends[0]:
+        index_begins = np.insert(index_begins, 0, 0)
+    
+    #get the possible sizes
+    possible_sizes = np.zeros(len(index_begins))
+    possible_durations = np.zeros(len(index_begins))
+    for i in range(len(index_begins)):
+        st = index_begins[i]
+        en = index_ends[i]
+        trapz_st = max([st-1,0])
+        trapz_en = min(en + 1, len(deriv))
+        possible_sizes[i] = trapz(deriv[trapz_st:trapz_en], time[trapz_st:trapz_en])
+        possible_durations[i] = time[en]-time[st]
+        
+    idxs = np.where(possible_sizes > mindrop)[0]
+    sizes = possible_sizes[idxs]
+    durations = possible_durations[idxs]
+    index_av_begins = index_begins[idxs]
+    index_av_ends = index_ends[idxs]
+
+    time2=0.5*(time[0:len(time)-1]+time[1:len(time)])
+    tsamp = np.median(np.diff(time2)) #sampling time
+    velocity = []
+    times = []
+    for k in range(len(index_av_begins)):
+        #mask= np.arange(index_av_begins[k] - (index_av_begins[k] == len(deriv)),index_av_ends[k] + (slip_durations[k] < 1))
+        
+        st = index_av_begins[k]
+        en = index_av_ends[k]
+        
+        mask= np.arange(st,en)
+        
+        if st == en:
+            mask = st
+        
+
+
+        #curv = deriv[mask] - min_diff #remove the min_diff
+        #curt = time2[mask]
+        #first order approximation: assume the shape begins and ends at min_diff halfway between the start index and the preceeding index. 
+        curv = np.zeros(en-st + 2)
+        curt = np.zeros(en-st + 2)
+        curv[1:-1] = deriv[mask]
+        #curv = np.concatenate(([0],curv,[0]))
+        curt[1:-1] = time2[mask]
+        curt[0] = curt[1]-tsamp/2
+        curt[-1] = curt[-2] + tsamp/2
+        velocity.append(list(curv))
+        times.append(list(curt))
+    
+    return [list(velocity), list(times), list(sizes),list(durations),list(index_av_begins), list(index_av_ends)]
