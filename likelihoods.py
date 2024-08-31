@@ -236,7 +236,7 @@ def exp_like(x,xmin,xmax,lam):
 
 #get the truncated power law likelihood function. Restricts values to be alpha > 1 and lambda > 0. Matches with powerlaw() library!
 def tpl_like(x,xmin,xmax,alpha,lam):
-    if alpha <= 1 or lam <= 0 or len(x) <= 5:
+    if alpha <= 1 or lam <= 0 or len(x) <= 5 or np.isnan(alpha) or np.isnan(lam):
         return -1e12, np.zeros(len(x))
     x = x[(x >= xmin)*(x <= xmax)]
     dist = (1-alpha)*np.log(lam) - alpha*np.log(x) - lam*x - mylog(gammainc(1-alpha,lam*xmin))
@@ -534,6 +534,7 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential'], stepsize = None)
         normx = np.rint(x/stepsize)
         normxmin = np.rint(xmin/stepsize)
         normxmax = np.rint(xmax/stepsize)
+    checks = []
     for i in range(len(totest)):
         if totest[i] == 'power_law':
             #print('pl')
@@ -559,9 +560,13 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential'], stepsize = None)
         if totest[i] == 'power_law':
             opts[i] = findfuns[i](x,xmin,xmax)[:-1] #in the case that we are testing against a discrete power law, always calculate the optimal value using find_pl_discrete on un-normalized data to avoid double-rounding error.
         dists[i] = llrfuns[i](normx,normxmin,normxmax,*opts[i])[-1]
+        checks = checks + list(opts[i])
 
+    checks = arr(checks)
     #print(dists)
     #now that the dist lists are populated, get the optimal values using MLE
+    if np.any(np.isnan(checks)):
+        return -1e10, -1
     ll,p = llr(dists[0],dists[1],nested = nested)
     return ll,p
 

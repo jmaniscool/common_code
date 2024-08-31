@@ -259,6 +259,10 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.45, pcrit = 0.35, pruns = 1
     
     data = np.sort(data) 
     
+    if max(data) <= 2*min(data):
+        print('Too few decades. Returning.')
+        return min(data),max(data),1
+    
     #defaults to use when dist_type = KS and not discrete.
     dfun = find_d_sorted
     distfun = find_d_sorted
@@ -359,6 +363,9 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.45, pcrit = 0.35, pruns = 1
         alpha = attempted_alphas[minidx]
         pq = attempted_pqs[minidx]
         p = attempted_pqs[minidx]
+        if stepsize is not None:
+            xmin = xmin*stepsize
+            xmax = xmax*stepsize
         return xmin,xmax,alpha
         
     possible_xmins = attempted_xmins[idxs]
@@ -386,6 +393,9 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.45, pcrit = 0.35, pruns = 1
         alpha = possible_alphas[minidx]
         pq = possible_pqs[minidx]
         p = possible_ps[minidx]
+        if stepsize is not None:
+            xmin = xmin*stepsize
+            xmax = xmax*stepsize
         return xmin,xmax,alpha
     
     possible_xmins2 = possible_xmins[idxs2]
