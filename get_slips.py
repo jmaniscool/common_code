@@ -409,6 +409,7 @@ def get_slips_vel(time, velocity, drops = True, threshold = 0, mindrop = 0, thre
 
     time2=0.5*(time[0:len(time)-1]+time[1:len(time)])
     tsamp = np.median(np.diff(time2)) #sampling time
+    time2 = np.append(time2,time2[-1] + tsamp)
     velocity = []
     times = []
     for k in range(len(index_av_begins)):
@@ -430,7 +431,7 @@ def get_slips_vel(time, velocity, drops = True, threshold = 0, mindrop = 0, thre
         curv = np.zeros(en-st + 2)
         curt = np.zeros(en-st + 2)
         curv[1:-1] = deriv[mask]
-        #curv = np.concatenate(([0],curv,[0]))
+        #curv = np.concatenate(([0],curv,[0])
         curt[1:-1] = time2[mask]
         curt[0] = curt[1]-tsamp/2
         curt[-1] = curt[-2] + tsamp/2
