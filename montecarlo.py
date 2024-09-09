@@ -156,12 +156,16 @@ def find_true_p_discrete(x,xmin,xmax,runs = 150, dfun = find_d_sorted_discrete):
 @numba.njit(parallel = True)
 def find_p_core(data,possible_xmins,possible_xmaxs, pruns, dfun):
     possible_ps = np.zeros(len(possible_xmins))
+    datas = np.zeros((len(possible_xmins),len(data)))
+    for i in range(len(datas)):
+        datas[i] = data
     for i in numba.prange(len(possible_ps)):
         xmin = possible_xmins[i]
         xmax = possible_xmaxs[i]
-        xmin_idx = find_nearest_idx(data,xmin)
-        xmax_idx = find_nearest_idx(data,xmax)
-        trimmed = data[xmin_idx:xmax_idx + 1]
+        cur = datas[i]
+        xmin_idx = find_nearest_idx(cur,xmin)
+        xmax_idx = find_nearest_idx(cur,xmax)
+        trimmed = cur[xmin_idx:xmax_idx + 1]
         possible_ps[i] = find_true_p(trimmed,xmin,xmax, runs = pruns, dfun = dfun)[0]
     
     return possible_ps
@@ -256,12 +260,12 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.45, pcrit = 0.35, pruns = 1
     alpha: float
         The optimal alpha found.
     """
-    
-    data = np.sort(data) 
-    
     if max(data) <= 2*min(data):
         print('Too few decades. Returning.')
         return min(data),max(data),1
+    
+    data = np.sort(data)
+    
     
     #defaults to use when dist_type = KS and not discrete.
     dfun = find_d_sorted
