@@ -13,6 +13,7 @@ from .decorator import figure_decorator
 from .generate_noise import generate_noise
 
 from .autofilter import autofilter
+from .autofilter import butter_highpass_filter as highpass
 
 from .culling import culling
 from .linemaker import linemaker #ethan's linemaker function, added 6-20-24
