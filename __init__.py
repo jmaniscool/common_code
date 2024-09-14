@@ -32,12 +32,13 @@ from .likelihoods import find_pl
 from .likelihoods import find_pl_discrete
 from .likelihoods import find_tpl
 from .likelihoods import find_exp
-from .likelihoods import find_lognormal
+from .likelihoods import find_lognormal_truncated as find_lognormal
 from .likelihoods import llr_wrap as llr
 from .likelihoods import ad
 from .likelihoods import pl_gen
 from .likelihoods import pl_gen_discrete
 from .likelihoods import tpl_gen
+from .likelihoods import lognormal_gen
 from .likelihoods import generate_test_data_with_xmax as generate_test_data
 
 #bootstrap (contains just bootstrap functions and all helpers)
