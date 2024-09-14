@@ -7,6 +7,45 @@ Created on Fri Jul  5 13:55:22 2024
 
 #Add all defunct functions that are not in use any more.
 
+#from powerlaw library. Edited to allow for an entire vector to be input at once.
+def lognormal_gen(x,xmin,xmax,mu,sigma):
+    from numpy import exp, sqrt, log, frompyfunc
+    from mpmath import erf, erfinv
+    #This is a long, complicated function broken into parts.
+    #We use mpmath to maintain numerical accuracy as we run through
+    #erf and erfinv, until we get to more sane numbers. Thanks to
+    #Wolfram Alpha for producing the appropriate inverse of the CCDF
+    #for me, which is what we need to calculate these things.
+    erfinv = frompyfunc(erfinv,1,1)
+    Q = erf( ( log(xmin) - mu ) / (sqrt(2)*sigma))
+    Q = Q*x - x + 1.0
+    Q = myfloat(erfinv(Q))
+    return exp(mu + sqrt(2)*sigma*Q)
+
+#lognormal likelihood that does not appropriately deal with the boundaries.
+def lognormal_like(x, xmin, xmax, mu, sigma):
+    
+    ##  NOTE: the corresponding log-likelihood function used by the powerlaw() library
+    #   does not appropriately limit the boundaries for mu or sigma. Mu can, in
+    #   principle, be any value. Negative values of mu might be expected if the generative process is from
+    #   multiplication of many positive random variables, for instance. This is possible in our system and AGNs, so
+    #   we should not limit mu or sigma. While AGN and stars are very different systems, the MHD equations
+    #   should still apply in both cases, albeit in different limits.
+    
+    #catch the illegal values of mu and sigma
+    #if sigma <= 0 or mu < log(xmin):
+    #    return -1e12, np.zeros(len(x))
+    x = np.array(x)
+    x = x[(x >= xmin)*(x <= xmax)]
+    n = len(x)
+    pi = mp.pi
+    #log likelihood is the sum of the log of the likelihoods for each point. Likelihood function is just pdf(x) for all x.
+    #mpmath is used because it has higher accuracy than scipy
+    dist = -mylog(x)-((mylog(x)-mu)**2/(2*sigma**2)) + 0.5*mylog(2/(pi*sigma**2))- mylog(myerfc((mylog(xmin)-mu)/(mysqrt(2)*sigma)))
+    ll = float(sum(dist))
+    dist = myfloat(dist) #convert to float
+    return ll, dist
+
 #get the (non-bca) confidence intervals from the array of bootstrapped values.
 #95% confidence interval is default. That is, 95% of values are going to be in range
 #(lo,hi)
