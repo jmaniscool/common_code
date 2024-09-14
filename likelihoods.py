@@ -515,7 +515,7 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential'], stepsize = None)
     x = np.sort(x)
     
     #if the inputs are 'power_law' and 'truncated_power_law', then the inputs are nested versions of one another.
-    if len(set(totest) - set(['power_law','truncated_power_law'])) == 0:
+    if (len(set(totest) - set(['power_law','truncated_power_law'])) == 0): #or (len(set(totest) - set(['power_law','lognormal'])) == 0): #note, according to Corrall et al 2019, the power law is nested within the truncated lognormal distribution.
         nested = True
     else:
         nested = False
@@ -553,8 +553,8 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential'], stepsize = None)
             llrfuns[i] = exp_like
         if totest[i] == 'lognormal':
             #print('ln')
-            findfuns[i] = find_lognormal
-            llrfuns[i] = lognormal_like
+            findfuns[i] = find_lognormal_truncated
+            llrfuns[i] = lognormal_like_truncated
             
         opts[i] = findfuns[i](normx,normxmin,normxmax)[:-1] #in the case that we are testing against a discrete power law, always calculate the optimal value using find_pl_discrete on un-normalized data to avoid double-rounding error.
         if totest[i] == 'power_law':
