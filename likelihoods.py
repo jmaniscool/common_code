@@ -159,7 +159,7 @@ def pl_gen_discrete(datalen,xmin,xmax,alpha):
     return out    
 
 #much faster and accurate enough generator for lognormal data.
-def lognormal_gen(size,mu,sigma, a = 0, b = np.inf):
+def lognormal_gen(size,a,b,mu,sigma):
     norm = scipy.stats.truncnorm.rvs((np.log(a)-mu)/sigma,(np.log(b)-mu)/sigma,loc = mu, scale = sigma, size = int(size))
     lognorm = np.exp(norm) #Becaue "norm" is normally distributed between log(a) and log(b), exp(norm) will be lognormally distributed between a and b.
     return lognorm
@@ -515,7 +515,7 @@ def llr_wrap(x,xmin,xmax, totest = ['power_law','exponential'], stepsize = None)
     x = np.sort(x)
     
     #if the inputs are 'power_law' and 'truncated_power_law', then the inputs are nested versions of one another.
-    if (len(set(totest) - set(['power_law','truncated_power_law'])) == 0): #or (len(set(totest) - set(['power_law','lognormal'])) == 0): #note, according to Corrall et al 2019, the power law is nested within the truncated lognormal distribution.
+    if (len(set(totest) - set(['power_law','truncated_power_law'])) == 0) or (len(set(totest) - set(['power_law','lognormal'])) == 0): #note, according to Corrall et al 2019, the power law is nested within the truncated lognormal distribution.
         nested = True
     else:
         nested = False
