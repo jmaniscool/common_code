@@ -117,11 +117,15 @@ height_width_ratio = 1 #the height/width ratio preferred by style guide https://
 
 #font sizes
 smallfont = 7
+smallmedfont = 8
 medfont = 9
 largefont = 16
 
+defaultfont = 'Arial'
+
+
 #text properties for subpanel
-subpanel_text_prop = FontProperties(family='Calibri', weight='bold', size = medfont)
+subpanel_text_prop = FontProperties(family= defaultfont, weight='bold', size = smallmedfont)
 
 _width = width_single_column
 _height = width_single_column * height_width_ratio
@@ -141,11 +145,12 @@ def convert_to_times(num,sigfigs = 0):
     #    return val[:eidx]
     
     #if mantissa is 1 exactly, then make the number in the format 10^{b}
-    if mantissa == 1:
-        val2 = val.replace("e",r"10\ss{").replace("+0","").replace("-0","-") + "}"
-        #val2 = val2.replace("10\ss{","10\ss{ ")
-        val2 = val2[eidx:]
-        return val2
+    #if mantissa == 1:
+    #    val2 = val.replace("e",r"10\ss{").replace("+0","").replace("-0","-") + "}"
+    #    #val2 = val2.replace("10\ss{","10\ss{ ")
+    #    val2 = val2[eidx:]
+    #    return val2
+    
     #if val[0] is not 1 and is not between 1 and 10, then make the number in the format a \times 10^{b}
     val2 = val.replace("e",r" \texttimes 10\ss{").replace("+0","").replace("-0","-") + "}"    
     #val2 = val2.replace("10\ss{","10\ss{ ")
@@ -157,8 +162,8 @@ def convert_to_times(num,sigfigs = 0):
 #you could also just write out the unit and the \unit command will parse.
 #Example kg m/s^2 = \unit{kg.m/s^{2}}
 #might need to set pgf.texsystem to xelatex, but this is the default.
-def figure_decorator(fontsize = medfont):
-    subpanel_text_prop = FontProperties(family='Calibri', weight='bold', size = fontsize)
+def figure_decorator(fontsize = smallmedfont, font = defaultfont):
+    subpanel_text_prop = FontProperties(family= font, weight='bold', size = fontsize)
     def figure_decorator_wrap(func):
         def wrapper(*args, **kwargs):
             
@@ -208,7 +213,7 @@ def figure_decorator(fontsize = medfont):
             \renewcommand{\ss}[1]{\textsuperscript{#1}}
             \renewcommand{\_}[1]{\textsubscript{#1}}
             '''
-            rcParams['font.sans-serif'] = 'Calibri' #set the sans-sarif font default to Calibri in matplotlib
+            rcParams['font.sans-serif'] = font #'Calibri' #set the sans-sarif font default to (whatever font you want, was Calibri) in matplotlib. Nature requires Arial.
             
             #title
             rcParams['axes.titlesize'] = titlesize
@@ -286,28 +291,3 @@ def figure_decorator(fontsize = medfont):
             return fig,axs
         return wrapper
     return figure_decorator_wrap
-
-#testing the stuff out.
-
-r"""
-@decorator(fontsize = 9) #plot function
-def fun():
-    fig, ax = plt.subplots() #always use constrained option
-    ax.plot([1, 2, 3], [4, 5, 6], label = 'my first label')
-    ax.plot([2,2,2],[5,4,5], '--', label = 'my second label')
-    ax.set_xlabel(r'Hello world (\unit{\micro\ohm})')
-    ax.set_ylabel(r'Hello y-axis')
-    plt.tight_layout()    
-    
-    #set the subpanel text
-    ax.annotate('(a)', xy=(0.05, 0.95), xycoords='axes fraction', fontproperties = subpanel_text_prop,
-            horizontalalignment='left', verticalalignment='top')
-    ax.legend() #follow advice on https://stackoverflow.com/questions/4700614/how-to-put-the-legend-outside-the-plot to get the legend outside of a plot, which may enhance legibility.
-    return fig,ax
-
-fig,ax = fun()
-
-fig.savefig('figure.pdf', backend='pgf')
-
-plt.close()
-"""

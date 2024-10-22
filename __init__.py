@@ -20,6 +20,8 @@ from .linemaker import linemaker #ethan's linemaker function, added 6-20-24
 
 #constants
 from .decorator import smallfont
+from .decorator import smallmedfont
+from .decorator import width_single_column
 from .decorator import medfont
 from .decorator import largefont
 from .decorator import subpanel_text_prop
