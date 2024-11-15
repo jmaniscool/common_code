@@ -1,31 +1,37 @@
 """
-Created Aug 30 2023
-Updated Jun 19 2024
-Author: Ethan
-
-Contains one function that generates a power law line
+Created Aug 30 2023 (Ethan Mullen)
+Updated Nov 14 2024 (Ethan Mullen)
 """
-
 import numpy as np
 
 
 def linemaker(slope, intercept, xmin, xmax, ppd=40):
     """
-    Returns X and Y arrays of a power law line over a specified region with a specified point density.
-    :param slope: Power law slope; INT or FLOAT.
-    :param intercept: Intercept of the line; list of INT or FLOAT.
-    :param xmin: Minimum x-value the line will appear over; INT or FLOAT.
-    :param xmax: Maximum x-value the line will appear over; INT or FLOAT
-    :param ppd: Number of log-spaced points per decade to evaluate the line at; INT.
-    :return:
-    [0] x_vals: X values of the line; Numpy array.
-    [1] y_vals: Y values of the line; Numpy array.
-    """
+    Returns X and Y arrays of a power-law line.
 
+    Parameters
+    ----------
+    slope: (Float; required)
+        Power law PDF slope
+    intercept: (List)
+        Intercept of the line
+        Formatted as [x-val, y-val]
+    xmin: (Float; required)
+        Minimum x-value the line will appear over
+    xmax: (Float; required)
+        Maximum x-value the line will appear over
+    ppd: (Int; optional)
+        Number of log-spaced points per decade to evaluate the line at
+
+    Returns
+    -------
+    [0] x_vals: (Array) X values of the line
+    [1] y_vals: (Array) Y values of the line
+    """
     if not (isinstance(slope, int) or isinstance(slope, float)) or slope == 0:
         print('Please enter the slope as a nonzero int or float')
         return 'temp'
-    if not(isinstance(intercept, list)):
+    if not isinstance(intercept, list):
         print('Please enter an intercept of the line as a list [x, y] of ints or floats')
         return 'temp'
     for coord in intercept:
