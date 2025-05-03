@@ -82,8 +82,9 @@ def weinerfilter_wrap(noise, unfiltered, fixfreq, exponent, fs = 1, relative_win
         #if the final segment, set idxen to be -1
         if i == nsegs - 1:
             idxen = -1
-        tmp = weinerfilter_core(noise[idxst:idxen],unfiltered[idxst:idxen],fixfreq,exponent,fs = fs, relative_window = relative_window)
-        filtered.append(list(tmp))    
+        x = unfiltered[idxst:idxen]
+        tmp = weinerfilter_core(noise[:len(x)],x,fixfreq,exponent,fs = fs, relative_window = relative_window)
+        filtered = filtered + list(tmp)
         
     return np.array(filtered)
 
