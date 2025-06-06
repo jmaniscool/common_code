@@ -145,11 +145,11 @@ def convert_to_times(num,sigfigs = 0):
     #    return val[:eidx]
     
     #if mantissa is 1 exactly, then make the number in the format 10^{b}
-    #if mantissa == 1:
-    #    val2 = val.replace("e",r"10\ss{").replace("+0","").replace("-0","-") + "}"
+    if mantissa == 1:
+        val2 = val.replace("e",r"10\ss{").replace("+0","").replace("-0","-") + "}"
     #    #val2 = val2.replace("10\ss{","10\ss{ ")
-    #    val2 = val2[eidx:]
-    #    return val2
+        val2 = val2[eidx:]
+        return val2
     
     #if val[0] is not 1 and is not between 1 and 10, then make the number in the format a \times 10^{b}
     val2 = val.replace("e",r" \texttimes 10\ss{").replace("+0","").replace("-0","-") + "}"    
