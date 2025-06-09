@@ -212,6 +212,7 @@ def figure_decorator(fontsize = smallmedfont, font = defaultfont):
             \renewcommand{\^}[1]{\textsuperscript{#1}}
             \renewcommand{\ss}[1]{\textsuperscript{#1}}
             \renewcommand{\_}[1]{\textsubscript{#1}}
+            \newcommand{\textsubsup}[3]{\ensuremath{\text{#1}^{\text{#2}}_{\text{#3}}}}
             '''
             rcParams['font.sans-serif'] = font #'Calibri' #set the sans-sarif font default to (whatever font you want, was Calibri) in matplotlib. Nature requires Arial.
             
