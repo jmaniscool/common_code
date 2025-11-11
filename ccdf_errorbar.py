@@ -159,14 +159,24 @@ def pointwise_errorbars(histy, ci, datalen):
             errs_top[i] = root_scalar(beta_hi_pearson, args = (N,n, ci_top), bracket = [0,1]).root
             errs_bot[i] = root_scalar(beta_lo_pearson, args = (N,n, ci_bot), bracket = [0,1]).root
         
+    
 
     #convert to error on CCDF
     top = 1 - errs_bot
     bot = 1 - errs_top
         
     #convert to relative error
+    #top = top - histy
+    #bot = histy - bot
+        
+    
+    #convert to relative error
     top = top - histy
     bot = histy - bot
+    
+    #fix errorbars to be within 0 <= p <= 1
+    bot[histy-bot < 0] = histy[histy - bot < 0]
+    top[histy + top > 1] = (1-histy)[histy + top > 1]
         
     return bot, top
 
@@ -228,15 +238,15 @@ def nir_errorbars(histy, ci, datalen):
 
     histy = np.array(histy)
     N = datalen
-    errs_top = np.zeros(N)
-    errs_bot = np.zeros(N)
+    errs_top = np.zeros(len(histy))
+    errs_bot = np.zeros(len(histy))
     ci_bot = (1 - ci)/2
     ci_top = (1 + ci)/2
     
     num_successes = (1-histy)*N #Convert from CCDF to number of trials less than (or equal to if using scipy option) current number.
     
     
-    for i in range(N):
+    for i in range(len(histy)):
         n = num_successes[i]
         
         #using root_scalar to solve function (faster than scipy)
@@ -257,20 +267,22 @@ def nir_errorbars(histy, ci, datalen):
         errs_bot[i] = minimize_scalar(mybeta_bot, bounds = (0,1), method = 'bounded').x#, method = 'Nelder-Mead').x
         """
     
-    #convert to CCDF errorbars
+    #convert to error on CCDF
     top = 1 - errs_bot
     bot = 1 - errs_top
         
+    #convert to relative error
+    #top = top - histy
+    #bot = histy - bot
+        
+    
     #convert to relative error
     top = top - histy
     bot = histy - bot
     
     #fix errorbars to be within 0 <= p <= 1
-    bot[bot < 0] = 0
-    top[top < 0] = 0
     bot[histy-bot < 0] = histy[histy - bot < 0]
     top[histy + top > 1] = (1-histy)[histy + top > 1]
-    #print('foo')
     
     return bot, top
 
